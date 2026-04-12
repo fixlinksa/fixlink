@@ -20,7 +20,7 @@ import Link from 'next/link';
 import { auth, db } from '@/lib/firebase';
 import { createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { syncUserProfile } from '@/lib/db';
-import { triggerWelcomeEmail } from '@/app/actions/auth';
+import { triggerWelcomeEmail, triggerAdminProNotification } from '@/app/actions/auth';
 import { useAuth } from '@/context/AuthContext';
 
 export default function SignupPage() {
@@ -74,7 +74,16 @@ export default function SignupPage() {
         console.error('Failed to send welcome email, but proceeding with registration:', emailErr);
       });
 
-      // 5. Redirect to onboarding
+      // 5. Notify Admin of new Professional - Non-blocking
+      if (role === 'tradesman') {
+        triggerAdminProNotification({ 
+          name: fullName, 
+          email: email, 
+          trade: 'New Professional (Pending Onboarding)' 
+        }).catch(err => console.error('Admin notification failed:', err));
+      }
+
+      // 6. Redirect to onboarding
       router.push('/onboarding');
     } catch (err: any) {
       console.error('Signup error:', err);

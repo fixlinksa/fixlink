@@ -33,9 +33,9 @@ export default function AdminSidebar({ isOpen, setIsOpen }: { isOpen: boolean; s
   return (
     <motion.div 
       initial={false}
-      animate={{ x: isOpen ? 0 : -320 }}
+      animate={{ x: isOpen ? 0 : (typeof window !== 'undefined' && window.innerWidth < 768 ? -window.innerWidth : -320) }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
-      className="w-80 h-screen bg-slate-900 text-white flex flex-col fixed left-0 top-0 z-50 shadow-[20px_0_50px_rgba(0,0,0,0.2)]"
+      className="w-full md:w-80 h-screen bg-slate-900 text-white flex flex-col fixed left-0 top-0 z-50 shadow-[20px_0_50px_rgba(0,0,0,0.2)]"
     >
       {/* Sidebar Header */}
       <div className="p-8 border-b border-white/5 flex items-center justify-between">
@@ -100,10 +100,10 @@ export default function AdminSidebar({ isOpen, setIsOpen }: { isOpen: boolean; s
         
         <button 
           onClick={signOut}
-          className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest text-red-400 hover:bg-red-400/10 transition-all border border-transparent hover:border-red-400/20"
+          className="w-full flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-[11px] md:text-xs uppercase tracking-widest text-red-100 bg-red-500/10 hover:bg-red-500/20 transition-all border border-red-500/20 shadow-lg shadow-red-500/5 active:scale-95"
         >
-          <LogOut className="w-5 h-5" />
-          Terminate Session
+          <LogOut className="w-5 h-5 shrink-0" />
+          <span className="truncate">Terminate Session</span>
         </button>
       </div>
 

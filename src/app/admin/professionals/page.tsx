@@ -92,14 +92,14 @@ export default function AdminProfessionalsPage() {
              className="w-full bg-white border border-slate-200 p-6 rounded-[2rem] pl-16 text-sm font-bold outline-none focus:border-primary transition-all shadow-sm group-hover:shadow-md"
            />
         </div>
-        <div className="flex gap-3">
+        <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
            {(['all', 'starter', 'missing', 'legend'] as const).map((tier) => (
              <button
                key={tier}
                onClick={() => setSelectedTier(tier)}
-               className={`px-8 py-5 rounded-[1.5rem] font-black text-[10px] uppercase tracking-widest transition-all border ${
+               className={`px-6 py-4 rounded-[1.2rem] font-black text-[9px] uppercase tracking-widest transition-all border shrink-0 ${
                  selectedTier === tier 
-                 ? 'bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/20' 
+                 ? 'bg-slate-900 border-slate-900 text-white shadow-xl shadow-slate-900/10' 
                  : 'bg-white border-slate-100 text-slate-400 hover:border-primary hover:text-primary'
                }`}
              >

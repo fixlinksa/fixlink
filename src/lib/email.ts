@@ -85,3 +85,38 @@ export async function sendDocumentEmail(to: string, proName: string, type: strin
     return { success: false, error: error?.message || String(error) };
   }
 }
+
+export async function sendAdminProNotification(proInfo: { name: string, email: string, trade: string }) {
+  const hasPassword = !!(process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq');
+  
+  if (!hasPassword) {
+    console.warn('Admin notification skipped: No email credentials');
+    return { success: false };
+  }
+
+  const mailOptions = {
+    from: '"Fix Link Intelligence" <fixlinksa@gmail.com>',
+    to: 'fixlinksa@gmail.com',
+    subject: `🚨 New Professional Alert: ${proInfo.name}`,
+    html: `
+      <div style="font-family: sans-serif; background: #f8fafc; padding: 40px; border-radius: 30px;">
+        <h2 style="color: #1E4E79; text-transform: uppercase;">Professional Onboarding Alert</h2>
+        <p style="font-size: 16px;">A new professional has registered on the platform:</p>
+        <div style="background: white; padding: 30px; border-radius: 20px; border: 1px solid #e2e8f0;">
+          <p><strong>Name:</strong> ${proInfo.name}</p>
+          <p><strong>Email:</strong> ${proInfo.email}</p>
+          <p><strong>Trade:</strong> ${proInfo.trade}</p>
+        </div>
+        <p style="margin-top: 30px; font-size: 12px; color: #64748b;">This is an automated intelligence notification from the Fix Link Marketplace.</p>
+      </div>
+    `
+  };
+
+  try {
+    await transporter.sendMail(mailOptions);
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to notify admin:', err);
+    return { success: false };
+  }
+}

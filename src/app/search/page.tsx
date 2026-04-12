@@ -63,6 +63,10 @@ const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false }
 );
+const Tooltip = dynamic(
+  () => import('react-leaflet').then((mod) => mod.Tooltip),
+  { ssr: false }
+);
 
 // Map initialization is handled within the component to prevent SSR errors
 
@@ -106,7 +110,7 @@ function SearchResultsContent() {
   const latParam = searchParams.get('lat');
   const lngParam = searchParams.get('lng');
   
-  const [activeTab, setActiveTab] = useState<'list' | 'map'>('list');
+  const [activeTab, setActiveTab] = useState<'list' | 'map'>('map');
   const [selectedTrade, setSelectedTrade] = useState<string>(queryParam);
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [pros, setPros] = useState<any[]>([]);
@@ -254,7 +258,7 @@ function SearchResultsContent() {
             <span className="w-8 h-[2px] bg-primary"></span>
             Search Results
           </div>
-          <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-slate-900 mb-4 uppercase italic">
+          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-slate-900 mb-4 uppercase italic">
             Found {filteredPros.length} <span className="text-primary">Professionals</span>
           </h1>
           <p className="text-slate-400 font-bold text-sm uppercase mb-6 flex items-center gap-2">
@@ -454,6 +458,16 @@ function SearchResultsContent() {
                         click: () => setSelectedPro(pro),
                       }}
                     >
+                      <Tooltip permanent direction="top" className="custom-map-tooltip">
+                        <div className="flex flex-col items-center">
+                          <span className="text-[9px] font-black uppercase tracking-tighter text-slate-900 bg-white px-2 py-0.5 rounded shadow-sm">
+                            {pro.name}
+                          </span>
+                          <span className="text-[7px] font-black uppercase tracking-widest text-primary bg-white/90 px-1 rounded-sm mt-0.5">
+                            {pro.trade?.split(' ')[0]}
+                          </span>
+                        </div>
+                      </Tooltip>
                       <Popup>
                         <div className="w-[280px] bg-white rounded-[2rem] overflow-hidden -m-[1px]">
                           {/* Pro Header Image */}
