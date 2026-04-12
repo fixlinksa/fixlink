@@ -9,7 +9,9 @@ const transporter = nodemailer.createTransport({
 });
 
 export async function sendWelcomeEmail(to: string, name: string) {
-  if (!process.env.GMAIL_APP_PASSWORD && !('kljbvpfjioscsqmq')) {
+  const hasPassword = !!(process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq');
+  
+  if (!hasPassword) {
     console.warn('Email skipped: GMAIL_APP_PASSWORD not configured.');
     return { success: false, error: 'Email service misconfigured' };
   }
