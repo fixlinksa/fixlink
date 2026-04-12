@@ -18,6 +18,22 @@ function getAdminApp() {
       } catch (error) {
         console.warn('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY (Build Warning):', error);
       }
+    } else {
+      // Local Fallback: Check for service account JSON file
+      try {
+        const path = require('path');
+        const fs = require('fs');
+        const saPath = path.join(process.cwd(), 'src', 'fix-link-marketplace-928374-firebase-adminsdk-fbsvc-59899c172a.json');
+        
+        if (fs.existsSync(saPath)) {
+          const serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+          return admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+          });
+        }
+      } catch (error) {
+        console.warn('Local Service Account Load Failed:', error);
+      }
     }
 
     // Fallback for build-time or restricted environments

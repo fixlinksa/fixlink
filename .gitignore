@@ -10,6 +10,7 @@
 firebase-debug.log*
 firestore-debug.log*
 ui-debug.log*
+src/fix-link-marketplace-928374-firebase-adminsdk-fbsvc-59899c172a.json
 
 # dependencies
 node_modules/
