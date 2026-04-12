@@ -41,6 +41,7 @@ function ChatContent() {
   const [chats, setChats] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
   const [isAttachOpen, setIsAttachOpen] = useState(false);
   const [availableDocs, setAvailableDocs] = useState<any[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);

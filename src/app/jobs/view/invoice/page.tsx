@@ -260,12 +260,22 @@ function InvoiceContent() {
              ...job,
              status: 'billed',
              amount: totals.incl,
+             total: totals.incl,
              isStandalone: true,
              tradesmanId: user!.uid,
              lineItems,
              notes,
              billedAt: new Date()
           });
+
+          // Also create sub-collection record for consistency and history
+          await createInvoice(newJob.id, {
+            amount: totals.incl,
+            lineItems,
+            notes,
+            status: 'issued'
+          });
+
           await handleDownloadPdf();
           router.push(`/jobs/view?id=${newJob.id}`);
         } catch (error) {
