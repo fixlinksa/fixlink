@@ -99,7 +99,7 @@ export default function InvoicesHistoryPage() {
            </div>
 
            <button 
-              onClick={() => router.push('/jobs/direct/invoice')}
+              onClick={() => router.push('/jobs/view/invoice?id=standalone')}
               className="px-10 py-5 bg-slate-900 text-white rounded-[2rem] font-black text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 active:scale-95 shadow-2xl transition-all italic"
             >
                <PlusCircle className="w-5 h-5" /> Issue New Invoice
@@ -133,7 +133,7 @@ export default function InvoicesHistoryPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
                   key={inv.id}
-                  onClick={() => router.push(`/jobs/${inv.id}/invoice`)}
+                  onClick={() => router.push(`/jobs/view/invoice?id=${inv.id}`)}
                   className="bg-white border border-slate-100 rounded-[3rem] p-8 md:p-10 shadow-sm hover:shadow-xl hover:border-primary/20 transition-all group cursor-pointer flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden"
                 >
                    <div className="flex items-center gap-8 flex-1 relative z-10">
@@ -165,7 +165,7 @@ export default function InvoicesHistoryPage() {
                              <Trash2 className="w-5 h-5" />
                           </button>
                           <button 
-                            onClick={() => router.push(`/jobs/${inv.id}/invoice`)}
+                            onClick={() => router.push(`/jobs/view/invoice?id=${inv.id}`)}
                             className="p-4 bg-primary/10 text-primary rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm"
                           >
                              <ChevronRight className="w-5 h-5" />
@@ -182,7 +182,7 @@ export default function InvoicesHistoryPage() {
                    </div>
                    <p className="text-slate-400 font-bold uppercase tracking-[0.2em] italic text-sm">No revenue archives detected in current perimeter.</p>
                    <button 
-                    onClick={() => router.push('/jobs/direct/invoice')}
+                    onClick={() => router.push('/jobs/view/invoice?id=standalone')}
                     className="text-primary font-black uppercase tracking-widest text-[10px] italic border-b-2 border-primary/20 hover:border-primary transition-all pb-1"
                    >
                      Initialize First Revenue Event

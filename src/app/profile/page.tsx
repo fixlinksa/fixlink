@@ -15,8 +15,9 @@ import {
   Loader2,
   Plus
 } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
+import LocationSearch from '@/components/jobs/LocationSearch';
 
 export default function ProfilePage() {
   const { user, profile, loading, signOut } = useAuth();
@@ -31,8 +32,11 @@ export default function ProfilePage() {
     vatNumber: '',
     isVatRegistered: false,
     estimateExpiryDays: 30,
+    address: '',
+    location: { lat: 0, lng: 0 } as any,
   });
   const [updateLoading, setUpdateLoading] = React.useState(false);
+  const [imageError, setImageError] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     if (profile) {
@@ -44,9 +48,17 @@ export default function ProfilePage() {
         vatNumber: profile.vatNumber || '',
         isVatRegistered: profile.isVatRegistered || false,
         estimateExpiryDays: profile.estimateExpiryDays || 30,
+        address: profile.address || '',
+        location: profile.location || { lat: -33.9249, lng: 18.4241 },
       });
     }
   }, [profile]);
+
+  React.useEffect(() => {
+    if (!loading && (!user || !profile)) {
+      router.push('/login');
+    }
+  }, [user, profile, loading, router]);
 
   if (loading) {
     return (
@@ -56,10 +68,7 @@ export default function ProfilePage() {
     );
   }
 
-  if (!user || !profile) {
-    router.push('/login');
-    return null;
-  }
+  if (!user || !profile) return null;
 
   const role = profile.role || 'customer';
 
@@ -72,6 +81,8 @@ export default function ProfilePage() {
         // Sync both for consistency
         businessName: formData.businessName,
         companyName: formData.businessName,
+        address: formData.address,
+        location: formData.location,
       });
       setIsEditing(false);
       window.location.reload(); // Refresh to show new data
@@ -94,6 +105,34 @@ export default function ProfilePage() {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 md:px-12">
       <div className="flex flex-col gap-8 max-w-3xl mx-auto">
+        {/* Image Error Alert */}
+        <AnimatePresence>
+          {imageError && (
+            <motion.div 
+              initial={{ opacity: 0, y: -20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -20 }}
+              className="bg-red-50 border-2 border-red-100 p-6 rounded-[2.5rem] flex items-center justify-between gap-4 shadow-xl shadow-red-500/10"
+            >
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-red-100 rounded-2xl flex items-center justify-center shrink-0">
+                  <Shield className="w-6 h-6 text-red-500" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-red-500 mb-0.5">Transmission Failure</p>
+                  <p className="text-sm font-black italic text-red-900 leading-tight">{imageError}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setImageError(null)}
+                className="p-3 bg-white text-red-300 rounded-xl hover:text-red-500 transition-colors"
+              >
+                <Plus className="w-5 h-5 rotate-45" />
+              </button>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <header className="flex items-center justify-between">
            <div>
               <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs mb-2 italic">
@@ -136,6 +175,12 @@ export default function ProfilePage() {
                       onChange={(e) => {
                         const file = e.target.files?.[0];
                         if (file) {
+                          // Check for 800KB limit (819,200 bytes)
+                          if (file.size > 800 * 1024) {
+                            setImageError("Profile photo is too heavy! Please reduce size below 800KB for mission synchronization.");
+                            return;
+                          }
+                          setImageError(null);
                           const reader = new FileReader();
                           reader.onloadend = () => {
                             setFormData({ ...formData, imageUrl: reader.result as string });
@@ -200,6 +245,12 @@ export default function ProfilePage() {
                         onChange={(e) => {
                           const file = e.target.files?.[0];
                           if (file) {
+                            // Check for 800KB limit
+                            if (file.size > 800 * 1024) {
+                              setImageError("Company logo is too heavy! Please reduce size below 800KB for mission synchronization.");
+                              return;
+                            }
+                            setImageError(null);
                             const reader = new FileReader();
                             reader.onloadend = () => {
                               setFormData({ ...formData, companyLogoUrl: reader.result as string });
@@ -212,6 +263,35 @@ export default function ProfilePage() {
                 </div>
              </div>
            )}
+ 
+           {/* Service Location Section */}
+           <div className="mt-10 pt-10 border-t border-slate-50 space-y-6">
+              <div>
+                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900 mb-1 italic">Service Territory & Location</h4>
+                 <p className="text-xs font-bold text-slate-400">Update your primary address to ensure accurate map visibility and relative distance calculations.</p>
+              </div>
+              
+              <div className="space-y-4">
+                 <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100 flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-4">
+                       <MapPin className="w-5 h-5 text-primary" />
+                       <div>
+                          <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-0.5">Current Address</p>
+                          <p className="text-xs font-bold text-slate-900 line-clamp-1">{formData.address || 'No location set'}</p>
+                       </div>
+                    </div>
+                 </div>
+                 
+                 <LocationSearch 
+                    onLocationSelect={(address, lat, lng) => setFormData({ ...formData, address, location: { lat, lng } })}
+                    placeholder="Search for new address..."
+                    className="shadow-sm"
+                 />
+                 <p className="text-[9px] font-bold text-slate-400 ml-4 italic flex items-center gap-2">
+                    <Shield className="w-3 h-3" /> This location is used primarily for calculating distance from customers.
+                 </p>
+              </div>
+           </div>
 
            {/* Hero Financial Config */}
            <div className="mt-10 pt-10 border-t border-slate-50 space-y-8">

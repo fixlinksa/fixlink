@@ -3,13 +3,37 @@
 import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { Loader2, ShieldAlert } from 'lucide-react';
+import { Loader2, ShieldAlert, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from 'lucide-react';
 import { motion } from 'framer-motion';
 import AdminSidebar from '@/components/admin/AdminSidebar';
+import { cn } from '@/lib/utils';
+import { repairJobFinancials } from '@/lib/db';
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const { user, profile, loading, isAdmin } = useAuth();
   const router = useRouter();
+  const [isSidebarOpen, setIsSidebarOpen] = React.useState(true);
+
+  // Responsive Initialization
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth < 768) {
+        setIsSidebarOpen(false);
+      }
+    };
+    handleResize(); // Initial check
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Tactical Auto-Repair for Legacy Missions
+  useEffect(() => {
+    if (isAdmin && user) {
+      const brokenMissionId = 'PXTZDkbKSIiTid5Fh071';
+      console.log("Tactical Scan: Checking mission integrity...", brokenMissionId);
+      repairJobFinancials(brokenMissionId).catch(console.error);
+    }
+  }, [isAdmin, user]);
 
   useEffect(() => {
     if (!loading && (!user || !isAdmin)) {
@@ -61,13 +85,51 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 flex">
-      <AdminSidebar />
-      <main className="flex-1 ml-80 min-h-screen overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-10 py-16">
-          {children}
-        </div>
-      </main>
+    <div className="min-h-screen bg-slate-50 flex overflow-hidden">
+      <AdminSidebar isOpen={isSidebarOpen} setIsOpen={setIsSidebarOpen} />
+      
+      <div className={`flex-1 transition-all duration-500 ease-in-out ${isSidebarOpen ? 'md:ml-80' : 'ml-0'}`}>
+        <header className="h-20 bg-white/80 backdrop-blur-md border-b border-slate-100 flex items-center px-4 md:px-10 sticky top-0 z-30 justify-between">
+            <button 
+              onClick={() => setIsSidebarOpen(!isSidebarOpen)}
+              className="group p-2.5 bg-slate-900 text-white border border-slate-700 rounded-xl shadow-2xl shadow-primary/20 hover:bg-primary transition-all flex items-center justify-center transform active:scale-90"
+            >
+              <motion.div
+                animate={{ rotate: isSidebarOpen ? 0 : 180 }}
+                transition={{ type: "spring", stiffness: 260, damping: 20 }}
+              >
+                <ChevronsLeft className={cn(
+                  "w-4 h-4 transition-colors",
+                  isSidebarOpen ? "text-white/70 group-hover:text-white" : "text-white"
+                )} />
+              </motion.div>
+            </button>
+           
+           <div className="flex items-center gap-6">
+              <div className="text-right hidden sm:block">
+                 <p className="text-[10px] font-black uppercase tracking-widest text-primary italic">Command Center</p>
+                 <p className="text-xs font-bold text-slate-400">Fix Link Intelligence Unit</p>
+              </div>
+              <div className="w-10 h-10 rounded-xl bg-slate-900 flex items-center justify-center text-white font-black italic shadow-inner">
+                 {profile?.fullName?.charAt(0) || 'A'}
+              </div>
+           </div>
+        </header>
+        
+        <main className="min-h-[calc(100vh-80px)] overflow-y-auto overflow-x-hidden">
+          <div className="max-w-7xl mx-auto px-4 md:px-10 py-12 md:py-16">
+            {children}
+          </div>
+        </main>
+      </div>
+
+      {/* Mobile Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
     </div>
   );
 }

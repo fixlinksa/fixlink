@@ -14,12 +14,16 @@ import {
   Clock,
   Loader2
 } from 'lucide-react';
+import AdminUserModal from '@/components/admin/AdminUserModal';
+import { ShieldAlert, ArrowUpRight } from 'lucide-react';
 import { getUsersByRole, UserProfile } from '@/lib/db';
+import { cn } from '@/lib/utils';
 
 export default function AdminCustomersPage() {
   const [customers, setCustomers] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     loadCustomers();
@@ -35,6 +39,10 @@ export default function AdminCustomersPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleUpdate = (updated: UserProfile) => {
+    setCustomers(prev => prev.map(c => c.id === updated.id ? updated : c));
   };
 
   const filteredCustomers = customers.filter(customer => 
@@ -87,66 +95,150 @@ export default function AdminCustomersPage() {
              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Scanning Customer Base...</p>
           </div>
         ) : (
-          <div className="overflow-x-auto min-w-full">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100">
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Seeker Identity</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Contact Matrix</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Mission History</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic text-right">Settings</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredCustomers.map((customer, index) => (
-                  <motion.tr 
-                    key={customer.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-10 py-8">
-                       <div className="flex items-center gap-4">
-                          <div className="w-14 h-14 rounded-2xl bg-slate-100 overflow-hidden border-2 border-white shadow-sm relative group-hover:scale-110 transition-transform">
-                             <img src={customer.imageUrl || `https://i.pravatar.cc/150?u=${customer.id}`} alt="" />
-                          </div>
-                          <div>
-                             <p className="text-sm font-black text-slate-900 tracking-tight uppercase italic">{customer.fullName}</p>
-                             <p className="text-[10px] font-medium text-slate-400 mt-0.5 lowercase italic tracking-wide">{customer.email}</p>
-                          </div>
-                       </div>
-                    </td>
-                    <td className="px-10 py-8 space-y-2">
-                       <div className="flex items-center gap-2">
-                          <Phone className="w-3.5 h-3.5 text-primary" />
-                          <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{customer.contactPhone || 'No Phone'}</span>
-                       </div>
-                       <div className="flex items-center gap-2">
-                          <MapPin className="w-3.5 h-3.5 text-slate-300" />
-                          <span className="text-[10px] font-medium text-slate-400 truncate max-w-[200px]">{customer.address || 'Address Pending'}</span>
-                       </div>
-                    </td>
-                    <td className="px-10 py-8">
-                       <div className="flex items-center gap-2 mb-1">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
-                          <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">12 Requests</span>
-                       </div>
-                       <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
-                          <Calendar className="w-3.5 h-3.5" />
-                          Joined Nov 2023
-                       </div>
-                    </td>
-                    <td className="px-10 py-8 text-right">
-                       <button className="p-3 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
-                          <MoreVertical className="w-5 h-5" />
-                       </button>
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden xl:block overflow-x-auto min-w-full">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Seeker Identity</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Contact Matrix</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Mission History</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic text-right">Settings</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredCustomers.map((customer, index) => (
+                      <motion.tr 
+                        key={customer.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="group hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-10 py-8">
+                           <div className="flex items-center gap-4">
+                              <div className={cn(
+                                "w-14 h-14 rounded-2xl bg-slate-100 overflow-hidden border-2 border-white shadow-sm relative group-hover:scale-110 transition-transform flex items-center justify-center",
+                                !customer.imageUrl && "bg-slate-50"
+                              )}>
+                                 {customer.imageUrl ? (
+                                   <img src={customer.imageUrl} alt="" className="w-full h-full object-cover" />
+                                 ) : (
+                                   <Users className="w-6 h-6 text-slate-200" />
+                                 )}
+                                 {(customer as any).status === 'suspended' && (
+                                   <div className="absolute inset-0 bg-red-500/40 flex items-center justify-center">
+                                      <ShieldAlert className="w-6 h-6 text-white" />
+                                   </div>
+                                 )}
+                              </div>
+                              <div>
+                                 <p className={`text-sm font-black tracking-tight uppercase italic ${(customer as any).status === 'suspended' ? 'text-red-500 line-through' : 'text-slate-900'}`}>{customer.fullName}</p>
+                                 <p className="text-[10px] font-medium text-slate-400 mt-0.5 lowercase italic tracking-wide">{customer.email}</p>
+                              </div>
+                           </div>
+                        </td>
+                        <td className="px-10 py-8 space-y-2">
+                           <div className="flex items-center gap-2">
+                              <Phone className="w-3.5 h-3.5 text-primary" />
+                              <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">{customer.contactPhone || 'No Phone'}</span>
+                           </div>
+                           <div className="flex items-center gap-2">
+                              <MapPin className="w-3.5 h-3.5 text-slate-300" />
+                              <span className="text-[10px] font-medium text-slate-400 truncate max-w-[200px]">{customer.address || 'Address Pending'}</span>
+                           </div>
+                        </td>
+                        <td className="px-10 py-8">
+                           <div className="flex items-center gap-2 mb-1">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                              <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest">Active Operative</span>
+                           </div>
+                           <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
+                              <Calendar className="w-3.5 h-3.5" />
+                              Authorized
+                           </div>
+                        </td>
+                        <td className="px-10 py-8 text-right">
+                           <button 
+                             onClick={() => setSelectedUser(customer)}
+                             className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all shadow-lg hover:shadow-primary/20"
+                           >
+                              Analyze Seeker
+                           </button>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile/Tablet Card View */}
+              <div className="xl:hidden p-4 sm:p-8 space-y-6">
+                 {filteredCustomers.map((customer, index) => (
+                    <motion.div 
+                      key={customer.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="bg-slate-50/50 border border-slate-100 p-6 sm:p-8 rounded-[2.5rem] space-y-6"
+                    >
+                       <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-4 min-w-0">
+                           <div className={cn(
+                             "w-16 h-16 rounded-[1.5rem] bg-white overflow-hidden border-2 border-slate-100 shadow-sm relative shrink-0 flex items-center justify-center",
+                             !customer.imageUrl && "bg-slate-50"
+                           )}>
+                              {customer.imageUrl ? (
+                                <img src={customer.imageUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <Users className="w-6 h-6 text-slate-200" />
+                              )}
+                              {(customer as any).status === 'suspended' && (
+                                 <div className="absolute inset-0 bg-red-500/40 flex items-center justify-center">
+                                    <ShieldAlert className="w-6 h-6 text-white" />
+                                 </div>
+                              )}
+                           </div>
+                           <div className="min-w-0">
+                              <p className={`text-base font-black tracking-tight uppercase italic truncate ${(customer as any).status === 'suspended' ? 'text-red-500 line-through' : 'text-slate-900'}`}>
+                                 {customer.fullName}
+                              </p>
+                              <p className="text-[10px] font-bold text-slate-400 lowercase truncate">
+                                 {customer.email}
+                              </p>
+                           </div>
+                        </div>
+                        <button 
+                          onClick={() => setSelectedUser(customer)}
+                          className="p-4 bg-slate-900 text-white rounded-2xl hover:bg-primary transition-all shadow-lg shrink-0"
+                        >
+                           <ArrowUpRight className="w-5 h-5" />
+                        </button>
+                     </div>
+
+                     <div className="grid grid-cols-2 gap-4 pt-6 border-t border-slate-100">
+                        <div className="min-w-0">
+                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 italic truncate">Contact</p>
+                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 truncate">
+                              <Phone className="w-3.5 h-3.5 text-primary" />
+                              {customer.contactPhone || 'N/A'}
+                           </div>
+                        </div>
+                        <div className="min-w-0">
+                           <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 italic truncate">Location</p>
+                           <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 truncate">
+                              <MapPin className="w-3.5 h-3.5 text-slate-300" />
+                              {customer.address || 'Pending'}
+                           </div>
+                        </div>
+                     </div>
+                    </motion.div>
+                 ))}
+              </div>
+            </>
+
+
         )}
 
         {!loading && filteredCustomers.length === 0 && (
@@ -159,6 +251,16 @@ export default function AdminCustomersPage() {
           </div>
         )}
       </div>
+
+      {/* Admin Action Modal */}
+      {selectedUser && (
+        <AdminUserModal 
+          user={selectedUser}
+          isOpen={!!selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onUpdate={handleUpdate}
+        />
+      )}
     </div>
   );
 }

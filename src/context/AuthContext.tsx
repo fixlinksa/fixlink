@@ -3,7 +3,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { auth, db } from '@/lib/firebase';
 import { onAuthStateChanged, signOut as firebaseSignOut, User } from 'firebase/auth';
-import { doc, getDoc, updateDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc, onSnapshot } from 'firebase/firestore';
 import { UserProfile } from '@/lib/db';
 
 interface AuthContextType {
@@ -30,57 +30,54 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+    const unsubscribeAuth = onAuthStateChanged(auth, (firebaseUser) => {
       setUser(firebaseUser);
-      
-      if (firebaseUser) {
-        // Fetch user profile from Firestore
-        const userRef = doc(db, 'users', firebaseUser.uid);
-        const userSnap = await getDoc(userRef);
+      if (!firebaseUser) {
+        setProfile(null);
+        setLoading(false);
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const userRef = doc(db, 'users', user.uid);
+    const unsubscribeProfile = onSnapshot(userRef, async (userSnap) => {
+      if (userSnap.exists()) {
+        const profileData = userSnap.data() as UserProfile;
         
-        if (userSnap.exists()) {
-          const profileData = userSnap.data() as UserProfile;
-          
-          // Auto-revert expired trials
-          if (profileData.tierStatus === 'trial' && profileData.tierTrialExpiresAt) {
-             const expiry = profileData.tierTrialExpiresAt.toDate 
-               ? profileData.tierTrialExpiresAt.toDate() 
-               : new Date(profileData.tierTrialExpiresAt);
-             
-             if (new Date() > expiry) {
-                const baseTier = profileData.preTrialTier || 'starter';
-                await updateDoc(userRef, {
-                  tier: baseTier,
-                  tierStatus: 'active',
-                  tierTrialExpiresAt: null,
-                  preTrialTier: null
-                });
-                
-                // Construct updated profile safely
-                const { tierTrialExpiresAt, preTrialTier, ...rest } = profileData;
-                setProfile({ 
-                  ...rest, 
-                  tier: baseTier, 
-                  tierStatus: 'active'
-                } as UserProfile);
-             } else {
-                setProfile(profileData);
-             }
-          } else {
-            setProfile(profileData);
-          }
-        } else {
-          setProfile(null);
+        // Auto-revert expired trials
+        if (profileData.tierStatus === 'trial' && profileData.tierTrialExpiresAt) {
+           const expiry = profileData.tierTrialExpiresAt.toDate 
+             ? profileData.tierTrialExpiresAt.toDate() 
+             : new Date(profileData.tierTrialExpiresAt);
+           
+           if (new Date() > expiry) {
+              const baseTier = profileData.preTrialTier || 'starter';
+              await updateDoc(userRef, {
+                tier: baseTier,
+                tierStatus: 'active',
+                tierTrialExpiresAt: null,
+                preTrialTier: null
+              });
+              return; // next snapshot will update state
+           }
         }
+        setProfile(profileData);
       } else {
         setProfile(null);
       }
-      
+      setLoading(false);
+    }, (error) => {
+      console.error("Profile listener error:", error);
       setLoading(false);
     });
 
-    return () => unsubscribe();
-  }, []);
+    return () => unsubscribeProfile();
+  }, [user]);
 
   const handleSignOut = async () => {
     await firebaseSignOut(auth);

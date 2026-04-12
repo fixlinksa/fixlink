@@ -12,26 +12,33 @@ import {
   BarChart3, 
   LogOut,
   ShieldCheck,
-  Zap
+  Zap,
+  X,
+  BookOpen
 } from 'lucide-react';
 import { useAuth } from '@/context/AuthContext';
 
 const NAV_ITEMS = [
-  { id: 'overview', label: 'Admin Overview', icon: LayoutDashboard, href: '/admin/dashboard' },
+  { id: 'overview', label: 'Platform Pulse', icon: BarChart3, href: '/admin/dashboard' },
   { id: 'professionals', label: 'Pro Fleet', icon: Hammer, href: '/admin/professionals' },
   { id: 'customers', label: 'Customer Base', icon: Users, href: '/admin/customers' },
-  { id: 'analytics', label: 'Platform Pulse', icon: BarChart3, href: '/admin/analytics' },
-  { id: 'settings', label: 'Command Center', icon: Settings, href: '/admin/settings' },
+  { id: 'team', label: 'Team Matrix', icon: ShieldCheck, href: '/admin/team' },
+  { id: 'info', label: 'Intel Manual', icon: BookOpen, href: '/admin/info' },
 ];
 
-export default function AdminSidebar() {
+export default function AdminSidebar({ isOpen, setIsOpen }: { isOpen: boolean; setIsOpen: (val: boolean) => void }) {
   const pathname = usePathname();
   const { profile, signOut } = useAuth();
 
   return (
-    <div className="w-80 h-screen bg-slate-900 text-white flex flex-col fixed left-0 top-0 z-50">
+    <motion.div 
+      initial={false}
+      animate={{ x: isOpen ? 0 : -320 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+      className="w-80 h-screen bg-slate-900 text-white flex flex-col fixed left-0 top-0 z-50 shadow-[20px_0_50px_rgba(0,0,0,0.2)]"
+    >
       {/* Sidebar Header */}
-      <div className="p-8 border-b border-white/5">
+      <div className="p-8 border-b border-white/5 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3 group">
           <div className="w-12 h-12 bg-primary rounded-2xl flex items-center justify-center text-white font-black text-2xl shadow-2xl shadow-primary/20 group-hover:scale-110 transition-all italic tracking-tighter">
             FL
@@ -44,10 +51,16 @@ export default function AdminSidebar() {
             </div>
           </div>
         </Link>
+        <button 
+          onClick={() => setIsOpen(false)}
+          className="md:hidden p-2 hover:bg-white/5 rounded-xl transition-colors"
+        >
+          <X className="w-5 h-5 text-slate-500" />
+        </button>
       </div>
 
       {/* Navigation */}
-      <nav className="flex-1 p-6 space-y-2 mt-4">
+      <nav className="flex-1 p-6 space-y-2 mt-4 overflow-y-auto custom-scrollbar">
         {NAV_ITEMS.map((item) => {
           const isActive = pathname === item.href;
           return (
@@ -55,10 +68,10 @@ export default function AdminSidebar() {
               key={item.id} 
               href={item.href}
               className={`flex items-center gap-4 px-6 py-4 rounded-2xl font-black text-xs uppercase tracking-widest transition-all group relative overflow-hidden ${
-                isActive ? 'bg-primary text-white shadow-xl shadow-primary/20' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                isActive ? 'text-white shadow-xl shadow-primary/20' : 'text-slate-400 hover:text-white hover:bg-white/5'
               }`}
             >
-              <item.icon className={`w-5 h-5 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-primary'}`} />
+              <item.icon className={`w-5 h-5 relative z-10 ${isActive ? 'text-white' : 'text-slate-500 group-hover:text-primary'}`} />
               <span className="relative z-10">{item.label}</span>
               {isActive && (
                 <motion.div 
@@ -96,6 +109,6 @@ export default function AdminSidebar() {
 
       {/* Decorative Glow */}
       <div className="absolute -bottom-20 -left-20 w-64 h-64 bg-primary/20 rounded-full blur-[100px] pointer-events-none"></div>
-    </div>
+    </motion.div>
   );
 }

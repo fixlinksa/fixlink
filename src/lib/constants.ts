@@ -43,7 +43,8 @@ export const TRADES = [
   "Steel Fabricators & Welders",
   "Tilers (Wall & Floor)",
   "Upholsterers",
-  "Window & Door Installers"
+  "Window & Door Installers",
+  "Network Cabling"
 ];
 
 export const TIER_CONFIG = {

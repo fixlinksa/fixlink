@@ -4,13 +4,13 @@ import React, { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Loader2 } from 'lucide-react';
 
-export default function JobRedirect({ params }: { params: Promise<{ id: string }> }) {
+export default function EditRedirect({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   const { id } = React.use(params);
 
   useEffect(() => {
     if (id) {
-      router.replace(`/jobs/view?id=${id}`);
+      router.replace(`/jobs/view/edit?id=${id}`);
     }
   }, [id, router]);
 

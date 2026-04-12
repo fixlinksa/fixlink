@@ -388,6 +388,10 @@ export default function OnboardingPage() {
               {/* Step 5: Trade Selection */}
               {step === 5 && (
                 <div className="space-y-8 text-left">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-black uppercase tracking-tight italic">Service <span className="text-primary tracking-normal">Categories</span></h2>
+                    <p className="text-xs text-muted-foreground font-medium italic">Select one or more trades that you specialize in. You will appear in search results for all selected categories.</p>
+                  </div>
                   <div className="relative group">
                     <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
                     <input 

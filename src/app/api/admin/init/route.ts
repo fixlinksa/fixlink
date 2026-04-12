@@ -4,7 +4,7 @@ import { adminAuth, adminDb } from '@/lib/firebase-admin';
 export async function GET() {
   try {
     const adminEmail = 'admin@fixlink.co.za';
-    const adminPassword = 'Sharne2010!';
+    const adminPassword = 'Abiec7808!';
 
     if (!adminAuth || !adminDb) {
       return NextResponse.json({ 

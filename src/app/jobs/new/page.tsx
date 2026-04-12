@@ -20,22 +20,27 @@ import { storage } from '@/lib/firebase';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { Loader2 } from 'lucide-react';
 
-const categories = [
-  { id: 'plumbing', name: 'Plumbing', icon: Droplets, color: '#3B82F6' },
-  { id: 'electrical', name: 'Electrical', icon: Zap, color: '#EAB308' },
-  { id: 'handyman', name: 'Handyman', icon: Hammer, color: '#F97316' },
-  { id: 'painting', name: 'Painting', icon: Paintbrush, color: '#8B5CF6' },
-];
+import { TRADES } from '@/lib/constants';
+import LocationSearch from '@/components/jobs/LocationSearch';
 
 export default function NewJobPage() {
   const [step, setStep] = useState(1);
+  const [tradeSearch, setTradeSearch] = useState('');
   const [formData, setFormData] = useState({
     title: '',
     categories: [] as string[],
     description: '',
     budget: '',
-    images: [] as string[]
+    images: [] as string[],
+    address: '',
+    lat: null as number | null,
+    lng: null as number | null
   });
+  
+  const filteredTrades = TRADES.filter(t => 
+    t.toLowerCase().includes(tradeSearch.toLowerCase())
+  );
+
   const [isUploading, setIsUploading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { user } = useAuth();
@@ -91,7 +96,7 @@ export default function NewJobPage() {
     if (!user) return;
     setIsSubmitting(true);
     try {
-      await createJob({
+      const job = await createJob({
         title: formData.title,
         description: formData.description,
         categories: formData.categories,
@@ -102,9 +107,13 @@ export default function NewJobPage() {
         customerName: user.displayName || 'Customer',
         customerEmail: user.email || '',
         status: 'pending',
-        location: 'TBD', // This could be enhanced with an address picker later
+        location: {
+          address: formData.address,
+          lat: formData.lat,
+          lng: formData.lng
+        },
       });
-      nextStep(); // Go to success step
+      router.push(`/jobs/view?id=${job.id}`);
     } catch (err) {
       console.error("Post job failed:", err);
     } finally {
@@ -144,34 +153,39 @@ export default function NewJobPage() {
             >
               <div>
                 <h1 className="text-3xl font-extrabold mb-2 tracking-tight">Select Category</h1>
-                <p className="text-muted-foreground font-medium italic">What type of help do you need?</p>
+                <p className="text-muted-foreground font-medium italic">Search and select the trades you need.</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                {categories.map((cat) => {
-                  const isSelected = formData.categories.includes(cat.id);
+              <div className="relative group">
+                <input 
+                  type="text"
+                  placeholder="Search trades (e.g. Plumbing)..."
+                  value={tradeSearch}
+                  onChange={(e) => setTradeSearch(e.target.value)}
+                  className="w-full p-6 bg-white rounded-2xl border border-border shadow-inner focus:border-primary outline-none font-bold"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 max-h-[400px] overflow-y-auto pr-2 no-scrollbar">
+                {filteredTrades.map((trade) => {
+                  const isSelected = formData.categories.includes(trade);
                   return (
                     <button
-                      key={cat.id}
+                      key={trade}
                       onClick={() => {
                         setFormData(prev => ({
                           ...prev,
                           categories: isSelected 
-                            ? prev.categories.filter(id => id !== cat.id)
-                            : [...prev.categories, cat.id]
+                            ? prev.categories.filter(id => id !== trade)
+                            : [...prev.categories, trade]
                         }));
                       }}
-                      className={`p-6 rounded-[2rem] border-2 transition-all flex flex-col items-center gap-4 ${
+                      className={`p-5 rounded-2xl border-2 transition-all flex items-center justify-between gap-4 ${
                         isSelected ? 'border-primary bg-primary/5' : 'border-border bg-white'
                       }`}
                     >
-                      <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: `${cat.color}20` }}>
-                        <cat.icon className="w-6 h-6" style={{ color: cat.color }} />
-                      </div>
-                      <div className="flex flex-col items-center">
-                        <span className="font-bold text-sm tracking-tight">{cat.name}</span>
-                        {isSelected && <CheckCircle2 className="w-3 h-3 text-primary mt-1" />}
-                      </div>
+                      <span className="font-bold text-sm tracking-tight">{trade}</span>
+                      {isSelected && <CheckCircle2 className="w-5 h-5 text-primary" />}
                     </button>
                   );
                 })}
@@ -196,11 +210,20 @@ export default function NewJobPage() {
               className="flex flex-col gap-8"
             >
               <div>
-                <h1 className="text-3xl font-extrabold mb-2 tracking-tight">Job Details</h1>
-                <p className="text-muted-foreground font-medium">Briefly describe the task for the pros.</p>
+                <h1 className="text-3xl font-extrabold mb-2 tracking-tight">Job & Location</h1>
+                <p className="text-muted-foreground font-medium">Where and what needs fixing?</p>
               </div>
 
               <div className="flex flex-col gap-6">
+                 <div>
+                    <label className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3 block">Task Location (Autocomplete)</label>
+                    <LocationSearch 
+                      placeholder="Street address, city, etc."
+                      onLocationSelect={(address, lat, lng) => {
+                        setFormData(prev => ({ ...prev, address, lat, lng }));
+                      }}
+                    />
+                 </div>
                  <div>
                     <label className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3 block">Job Title</label>
                     <input 
@@ -208,7 +231,7 @@ export default function NewJobPage() {
                       placeholder="e.g. Broken master bathroom tap"
                       value={formData.title}
                       onChange={(e) => setFormData({...formData, title: e.target.value})}
-                      className="w-full p-4 rounded-2xl border border-border focus:ring-2 focus:ring-primary outline-none"
+                      className="w-full p-6 bg-white rounded-2xl border border-border focus:ring-2 focus:ring-primary outline-none font-bold"
                     />
                  </div>
                  <div>
@@ -218,14 +241,14 @@ export default function NewJobPage() {
                       rows={5}
                       value={formData.description}
                       onChange={(e) => setFormData({...formData, description: e.target.value})}
-                      className="w-full p-4 rounded-2xl border border-border focus:ring-2 focus:ring-primary outline-none"
+                      className="w-full p-6 bg-white rounded-2xl border border-border focus:ring-2 focus:ring-primary outline-none font-bold"
                     />
                  </div>
               </div>
 
               <button 
                 onClick={nextStep}
-                disabled={!formData.title || !formData.description}
+                disabled={!formData.title || !formData.description || !formData.address}
                 className="w-full py-5 rounded-2xl bg-primary text-white font-bold shadow-xl shadow-primary/20 flex items-center justify-center disabled:opacity-50 disabled:shadow-none transition-all"
               >
                 Next Section <ArrowRight className="ml-2 w-5 h-5" />
@@ -250,13 +273,13 @@ export default function NewJobPage() {
                  <div>
                     <label className="text-xs font-extrabold uppercase tracking-widest text-muted-foreground mb-3 block">Estimated Budget (Optional)</label>
                     <div className="relative">
-                       <span className="absolute left-4 top-1/2 -translate-y-1/2 font-bold text-muted-foreground">R</span>
+                       <span className="absolute left-6 top-1/2 -translate-y-1/2 font-black text-muted-foreground italic">R</span>
                        <input 
                         type="number"
                         placeholder="0.00"
                         value={formData.budget}
                         onChange={(e) => setFormData({...formData, budget: e.target.value})}
-                        className="w-full p-4 pl-10 rounded-2xl border border-border focus:ring-2 focus:ring-primary outline-none font-bold"
+                        className="w-full p-6 pl-12 bg-white rounded-2xl border border-border shadow-inner focus:ring-2 focus:ring-primary outline-none font-black italic text-lg"
                        />
                     </div>
                  </div>
@@ -267,7 +290,7 @@ export default function NewJobPage() {
                         <img src={url} alt="Job" className="w-full h-full object-cover" />
                         <button 
                           onClick={() => setFormData(p => ({ ...p, images: p.images.filter((_, i) => i !== idx) }))}
-                          className="absolute top-1 right-1 bg-red-500 text-white p-1 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="absolute top-2 right-2 bg-red-500 text-white w-6 h-6 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity font-black"
                         >
                           ×
                         </button>
@@ -281,7 +304,7 @@ export default function NewJobPage() {
                         className="aspect-square rounded-2xl border-2 border-dashed border-muted-foreground/30 flex flex-col items-center justify-center gap-2 hover:bg-muted/50 transition-all text-muted-foreground"
                       >
                         {isUploading ? <Loader2 className="w-6 h-6 animate-spin" /> : <Camera className="w-6 h-6" />}
-                        <span className="text-[10px] font-bold">{isUploading ? 'Uploading...' : 'Add Photo'}</span>
+                        <span className="text-[10px] font-bold uppercase tracking-widest">{isUploading ? 'Syncing...' : 'Add Photo'}</span>
                       </button>
                     )}
                     <input 
@@ -296,7 +319,7 @@ export default function NewJobPage() {
 
               <button 
                 onClick={nextStep}
-                className="w-full py-5 rounded-2xl bg-primary text-white font-bold shadow-xl shadow-primary/20 flex items-center justify-center transition-all"
+                className="w-full py-5 rounded-2xl bg-primary text-white font-bold shadow-xl shadow-primary/20 flex items-center justify-center transition-all mt-4"
               >
                 Review Application <ArrowRight className="ml-2 w-5 h-5" />
               </button>
@@ -312,33 +335,37 @@ export default function NewJobPage() {
               className="flex flex-col gap-8"
             >
               <div className="text-center flex flex-col items-center">
-                <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center text-green-500 mb-6">
+                <div className="w-20 h-20 rounded-3xl bg-green-500/10 border border-green-500/20 flex items-center justify-center text-green-500 mb-6 shadow-glow">
                    <CheckCircle2 className="w-10 h-10" />
                 </div>
-                <h1 className="text-3xl font-extrabold mb-2 tracking-tight text-foreground">All Set!</h1>
-                <p className="text-muted-foreground text-center max-w-sm">
-                   Your job for <span className="font-bold text-foreground">"{formData.title}"</span> is ready to be posted.
+                <h1 className="text-3xl font-extrabold mb-2 tracking-tight text-foreground uppercase italic">Mission <span className="text-primary">Ready</span></h1>
+                <p className="text-muted-foreground text-center font-medium max-w-sm italic">
+                   Deploying: <span className="font-bold text-foreground">"{formData.title}"</span>
                 </p>
               </div>
 
-              <div className="p-6 rounded-3xl bg-muted/30 border border-border space-y-4">
-                 <div className="flex justify-between font-bold text-sm">
-                    <span className="text-muted-foreground">Trades</span>
-                    <span className="text-foreground">{formData.categories.map(c => categories.find(cat => cat.id === c)?.name).join(', ')}</span>
+              <div className="p-8 rounded-[2.5rem] bg-white border border-border shadow-2xl space-y-6">
+                 <div className="flex border-b border-muted pb-4 justify-between font-bold text-sm">
+                    <span className="text-muted-foreground uppercase tracking-widest text-[10px]">Primary Category</span>
+                    <span className="text-foreground italic">{formData.categories[0]}</span>
+                 </div>
+                 <div className="flex border-b border-muted pb-4 justify-between font-bold text-sm">
+                    <span className="text-muted-foreground uppercase tracking-widest text-[10px]">Location Range</span>
+                    <span className="text-foreground italic text-right max-w-[200px] line-clamp-1">{formData.address}</span>
                  </div>
                  <div className="flex justify-between font-bold text-sm">
-                    <span className="text-muted-foreground">Budget</span>
-                    <span className="text-foreground">{formData.budget ? `R${formData.budget}` : 'TBD'}</span>
+                    <span className="text-muted-foreground uppercase tracking-widest text-[10px]">Budget Cap</span>
+                    <span className="text-foreground italic font-black text-lg">R {formData.budget || 'TBD'}</span>
                  </div>
               </div>
 
               <button 
                 onClick={handlePostJob}
                 disabled={isSubmitting}
-                className="w-full py-5 rounded-2xl bg-primary text-white font-bold shadow-xl shadow-primary/20 flex items-center justify-center gap-3 transition-all"
+                className="w-full py-6 rounded-2xl bg-primary text-white font-black uppercase tracking-[0.2em] shadow-2xl shadow-primary/20 flex items-center justify-center gap-3 transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50"
               >
-                {isSubmitting && <Loader2 className="w-5 h-5 animate-spin" />}
-                {isSubmitting ? 'Posting Job...' : 'Post Job Globally'}
+                {isSubmitting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Zap className="w-5 h-5 fill-current" />}
+                {isSubmitting ? 'Deploying...' : 'Broadcast Mission Globally'}
               </button>
             </motion.div>
           )}
@@ -347,3 +374,4 @@ export default function NewJobPage() {
     </div>
   );
 }
+

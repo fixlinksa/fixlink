@@ -3,18 +3,18 @@ import nodemailer from 'nodemailer';
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: process.env.GMAIL_USER || 'fixsynsa@gmail.com',
-    pass: process.env.GMAIL_APP_PASSWORD,
+    user: process.env.GMAIL_USER || 'fixlinksa@gmail.com',
+    pass: process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq',
   },
 });
 
 export async function sendWelcomeEmail(to: string, name: string) {
-  if (!process.env.GMAIL_APP_PASSWORD) {
+  if (!process.env.GMAIL_APP_PASSWORD && !('kljbvpfjioscsqmq')) {
     console.warn('Email skipped: GMAIL_APP_PASSWORD not configured.');
     return { success: false, error: 'Email service misconfigured' };
   }
   const mailOptions = {
-    from: '"Fix Link" <fixsynsa@gmail.com>',
+    from: '"Fix Link" <fixlinksa@gmail.com>',
     to,
     subject: 'Welcome to Fix Link! 🚀',
     html: `

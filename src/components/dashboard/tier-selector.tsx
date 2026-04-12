@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
+import { useRouter } from 'next/navigation';
 import { TIER_CONFIG, TierId } from '@/lib/constants';
 import { useAuth } from '@/context/AuthContext';
 import { updateUserProfile } from '@/lib/db';
@@ -18,6 +19,7 @@ import { cn } from '@/lib/utils';
 
 export default function TierSelector({ onComplete }: { onComplete?: () => void }) {
   const { profile, user } = useAuth();
+  const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
 
   const [showTrialModal, setShowTrialModal] = useState<{ tierId: TierId; name: string } | null>(null);
@@ -44,8 +46,11 @@ export default function TierSelector({ onComplete }: { onComplete?: () => void }
       });
       
       setShowTrialModal(null);
-      if (onComplete) onComplete();
-      else window.location.reload();
+      if (onComplete) {
+        onComplete();
+      } else {
+        router.push('/dashboard/tradesman');
+      }
     } catch (error) {
       console.error('Upgrade failed:', error);
     } finally {

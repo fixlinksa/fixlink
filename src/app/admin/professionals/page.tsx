@@ -14,17 +14,20 @@ import {
   Zap,
   ChevronRight,
   ArrowUpRight,
-  Loader2
+  Loader2,
+  ShieldAlert
 } from 'lucide-react';
-import { getUsersByRole, updateUserProfile, UserProfile } from '@/lib/db';
-import { TIER_CONFIG, TierId } from '@/lib/constants';
+import AdminUserModal from '@/components/admin/AdminUserModal';
+import { getUsersByRole, UserProfile } from '@/lib/db';
+import { TierId, TIER_CONFIG } from '@/lib/constants';
+import { cn } from '@/lib/utils';
 
 export default function AdminProfessionalsPage() {
   const [pros, setPros] = useState<UserProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTier, setSelectedTier] = useState<TierId | 'all'>('all');
-  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
 
   useEffect(() => {
     loadPros();
@@ -42,16 +45,8 @@ export default function AdminProfessionalsPage() {
     }
   };
 
-  const handleTierChange = async (userId: string, newTier: TierId) => {
-    setUpdatingId(userId);
-    try {
-      await updateUserProfile(userId, { tier: newTier });
-      setPros(prev => prev.map(p => p.id === userId ? { ...p, tier: newTier } : p));
-    } catch (error) {
-      console.error('Error updating tier:', error);
-    } finally {
-      setUpdatingId(null);
-    }
+  const handleUpdate = (updated: UserProfile) => {
+    setPros(prev => prev.map(p => p.id === updated.id ? updated : p));
   };
 
   const filteredPros = pros.filter(pro => {
@@ -122,84 +117,160 @@ export default function AdminProfessionalsPage() {
              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Scanning Professional Fleet...</p>
           </div>
         ) : (
-          <div className="overflow-x-auto min-w-full">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="bg-slate-50/50 border-b border-slate-100">
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Hero Identity</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Specialization</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Current Tier</th>
-                  <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-50">
-                {filteredPros.map((pro, index) => (
-                  <motion.tr 
-                    key={pro.id}
-                    initial={{ opacity: 0, x: -20 }}
-                    animate={{ opacity: 1, x: 0 }}
-                    transition={{ delay: index * 0.05 }}
-                    className="group hover:bg-slate-50/50 transition-colors"
-                  >
-                    <td className="px-10 py-8">
-                      <div className="flex items-center gap-4">
-                        <div className="w-14 h-14 rounded-2xl bg-slate-100 overflow-hidden border-2 border-white shadow-sm relative group-hover:scale-110 transition-transform">
-                          <img src={pro.imageUrl || `https://i.pravatar.cc/150?u=${pro.id}`} alt="" />
-                          {pro.onboardingCompleted && (
-                            <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center">
-                              <CheckCircle2 className="w-4 h-4 text-green-500" />
+            <>
+              {/* Desktop Table View */}
+              <div className="hidden xl:block overflow-x-auto min-w-full">
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50/50 border-b border-slate-100">
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Hero Identity</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Specialization</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic">Current Tier</th>
+                      <th className="px-10 py-8 text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] italic text-right">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-50">
+                    {filteredPros.map((pro, index) => (
+                      <motion.tr 
+                        key={pro.id}
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: index * 0.05 }}
+                        className="group hover:bg-slate-50/50 transition-colors"
+                      >
+                        <td className="px-10 py-8">
+                          <div className="flex items-center gap-4">
+                            <div className={cn(
+                              "w-14 h-14 rounded-2xl bg-slate-100 overflow-hidden border-2 border-white shadow-sm relative group-hover:scale-110 transition-transform flex items-center justify-center",
+                              !pro.imageUrl && "bg-slate-50 border-slate-100"
+                            )}>
+                              {pro.imageUrl ? (
+                                <img src={pro.imageUrl} alt="" className="w-full h-full object-cover" />
+                              ) : (
+                                <Hammer className="w-6 h-6 text-slate-200" />
+                              )}
+                              {(pro as any).status === 'suspended' && (
+                                 <div className="absolute inset-0 bg-red-500/40 flex items-center justify-center">
+                                    <ShieldAlert className="w-6 h-6 text-white" />
+                                 </div>
+                              )}
+                              {pro.onboardingCompleted && (
+                                <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center">
+                                  <CheckCircle2 className="w-4 h-4 text-green-500" />
+                                </div>
+                              )}
                             </div>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-sm font-black text-slate-900 tracking-tight uppercase italic">{pro.fullName}</p>
-                          <p className="text-[10px] font-medium text-slate-400 mt-0.5">{pro.businessName || pro.companyName || 'Individual Trader'}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-10 py-8">
-                      <div className="flex items-center gap-2 mb-1">
-                        <Hammer className="w-3.5 h-3.5 text-primary" />
-                        <span className="text-[10px] font-black text-primary uppercase tracking-widest italic">{pro.trade || 'Generalist'}</span>
-                      </div>
-                      <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
-                         <MapPin className="w-3.5 h-3.5" />
-                         {pro.address?.split(',')[0] || 'Location Pending'}
-                      </div>
-                    </td>
-                    <td className="px-10 py-8">
-                       <div className="flex items-center gap-4">
-                          <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
-                            pro.tier === 'legend' ? 'bg-accent/10 border-accent text-accent' :
-                            pro.tier === 'missing' ? 'bg-primary/10 border-primary text-primary' :
-                            'bg-slate-100 border-slate-200 text-slate-400'
-                          }`}>
-                            {pro.tier ? TIER_CONFIG[pro.tier].name : 'Link Starter'}
+                            <div>
+                              <p className={`text-sm font-black tracking-tight uppercase italic ${(pro as any).status === 'suspended' ? 'text-red-500 line-through' : 'text-slate-900'}`}>{pro.fullName}</p>
+                              <p className="text-[10px] font-medium text-slate-400 mt-0.5">{pro.businessName || pro.companyName || 'Individual Trader'}</p>
+                            </div>
                           </div>
-                       </div>
-                    </td>
-                    <td className="px-10 py-8 text-right">
-                       <div className="flex items-center justify-end gap-2">
-                          <select 
-                            value={pro.tier || 'starter'}
-                            disabled={updatingId === pro.id}
-                            onChange={(e) => handleTierChange(pro.id, e.target.value as TierId)}
-                            className="bg-slate-50 border-slate-200 text-[10px] font-black uppercase tracking-widest p-3 rounded-xl outline-none focus:border-primary disabled:opacity-50 transition-all cursor-pointer"
+                        </td>
+                        <td className="px-10 py-8">
+                          <div className="flex items-center gap-2 mb-1">
+                            <Hammer className="w-3.5 h-3.5 text-primary" />
+                            <span className="text-[10px] font-black text-primary uppercase tracking-widest italic">{pro.trade || 'Generalist'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 text-[10px] text-slate-400 font-medium">
+                             <MapPin className="w-3.5 h-3.5" />
+                             {pro.address?.split(',')[0] || 'Location Pending'}
+                          </div>
+                        </td>
+                        <td className="px-10 py-8">
+                           <div className="flex items-center gap-4">
+                              <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
+                                pro.tier === 'legend' ? 'bg-accent/10 border-accent text-accent' :
+                                pro.tier === 'missing' ? 'bg-primary/10 border-primary text-primary' :
+                                'bg-slate-100 border-slate-200 text-slate-400'
+                              }`}>
+                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'Link Starter'}
+                              </div>
+                           </div>
+                        </td>
+                        <td className="px-10 py-8 text-right">
+                           <button 
+                             onClick={() => setSelectedUser(pro)}
+                             className="px-6 py-3 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-all shadow-lg hover:shadow-primary/20"
+                           >
+                              Manage Hero
+                           </button>
+                        </td>
+                      </motion.tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Mobile/Tablet Card View */}
+              <div className="xl:hidden p-4 sm:p-8 space-y-6">
+                 {filteredPros.map((pro, index) => (
+                    <motion.div 
+                      key={pro.id}
+                      initial={{ opacity: 0, y: 20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: index * 0.05 }}
+                      className="bg-slate-50/50 border border-slate-100 p-6 sm:p-8 rounded-[2.5rem] space-y-6"
+                    >
+                       <div className="flex items-center justify-between gap-4">
+                          <div className="flex items-center gap-4 min-w-0">
+                             <div className={cn(
+                               "w-16 h-16 rounded-[1.5rem] bg-white overflow-hidden border-2 border-slate-100 shadow-sm relative shrink-0 flex items-center justify-center",
+                               !pro.imageUrl && "bg-slate-50"
+                             )}>
+                                {pro.imageUrl ? (
+                                  <img src={pro.imageUrl} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <Hammer className="w-6 h-6 text-slate-200" />
+                                )}
+                                {(pro as any).status === 'suspended' && (
+                                   <div className="absolute inset-0 bg-red-500/40 flex items-center justify-center">
+                                      <ShieldAlert className="w-6 h-6 text-white" />
+                                   </div>
+                                )}
+                             </div>
+                             <div className="min-w-0">
+                                <p className={`text-base font-black tracking-tight uppercase italic truncate ${(pro as any).status === 'suspended' ? 'text-red-500 line-through' : 'text-slate-900'}`}>
+                                   {pro.fullName}
+                                </p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest truncate">
+                                   {pro.businessName || pro.companyName || 'Individual Trader'}
+                                </p>
+                             </div>
+                          </div>
+                          <button 
+                            onClick={() => setSelectedUser(pro)}
+                            className="p-4 bg-slate-900 text-white rounded-2xl hover:bg-primary transition-all shadow-lg shrink-0"
                           >
-                             <option value="starter">Promote to Starter</option>
-                             <option value="missing">Promote to Missing</option>
-                             <option value="legend">Elevate to Legend</option>
-                          </select>
-                          <button className="p-3 bg-slate-100 text-slate-400 rounded-xl hover:bg-slate-900 hover:text-white transition-all shadow-sm">
-                             <MoreVertical className="w-5 h-5" />
+                             <ArrowUpRight className="w-5 h-5" />
                           </button>
                        </div>
-                    </td>
-                  </motion.tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+                       <div className="grid grid-cols-2 gap-4 pt-6 border-t border-slate-100">
+                          <div className="min-w-0">
+                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 italic truncate">Specialization</p>
+                             <div className="flex items-center gap-1.5 text-xs font-bold text-primary truncate">
+                                <Hammer className="w-3.5 h-3.5" />
+                                {pro.trade || 'Generalist'}
+                             </div>
+                          </div>
+                          <div className="min-w-0">
+                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 italic truncate">Current Tier</p>
+                             <span className={cn(
+                               "inline-block px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic border truncate max-w-full",
+                               pro.tier === 'legend' ? 'bg-accent/10 border-accent text-accent' :
+                               pro.tier === 'missing' ? 'bg-primary/10 border-primary text-primary' :
+                               'bg-slate-100 border-slate-200 text-slate-400'
+                             )}>
+                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'Starter'}
+                             </span>
+                          </div>
+                       </div>
+                    </motion.div>
+                 ))}
+              </div>
+            </>
+
+
         )}
 
         {!loading && filteredPros.length === 0 && (
@@ -212,6 +283,16 @@ export default function AdminProfessionalsPage() {
           </div>
         )}
       </div>
+
+      {/* Admin Action Modal */}
+      {selectedUser && (
+        <AdminUserModal 
+          user={selectedUser}
+          isOpen={!!selectedUser}
+          onClose={() => setSelectedUser(null)}
+          onUpdate={handleUpdate}
+        />
+      )}
 
       {/* Decorative Elements */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-8">

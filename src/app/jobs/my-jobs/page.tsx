@@ -66,7 +66,7 @@ export default function MyJobsPage() {
       ) : (
         <div className="grid grid-cols-1 gap-4">
           {jobs.map((job) => (
-            <Link key={job.id} href={`/jobs/${job.id}`}>
+            <Link key={job.id} href={`/jobs/view?id=${job.id}`}>
               <motion.div
                 whileHover={{ scale: 1.01 }}
                 className="bg-white border border-border rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex items-center justify-between group"

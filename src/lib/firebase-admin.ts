@@ -6,12 +6,17 @@ function getAdminApp() {
     
     if (serviceAccountKey) {
       try {
-        const serviceAccount = JSON.parse(serviceAccountKey);
+        // Sanitize the key to handle newlines correctly, especially if passed via some env systems
+        const sanitizedKey = serviceAccountKey.includes('\\n') 
+          ? serviceAccountKey.replace(/\\n/g, '\n')
+          : serviceAccountKey;
+
+        const serviceAccount = JSON.parse(sanitizedKey);
         return admin.initializeApp({
           credential: admin.credential.cert(serviceAccount),
         });
       } catch (error) {
-        console.error('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY:', error);
+        console.warn('Failed to parse FIREBASE_SERVICE_ACCOUNT_KEY (Build Warning):', error);
       }
     }
 

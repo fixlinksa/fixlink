@@ -24,6 +24,7 @@ export default function AdminDashboardPage() {
   const [recentMissions, setRecentMissions] = React.useState<any[]>([]);
   const [pendingCount, setPendingCount] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
+  const [marketStats, setMarketStats] = React.useState({ totalVolume: 0, avgBudget: 0 });
 
   React.useEffect(() => {
     const fetchData = async () => {
@@ -32,19 +33,31 @@ export default function AdminDashboardPage() {
         const [pros, customers, jobsSnap, trialsSnap] = await Promise.all([
           getUsersByRole('tradesman'),
           getUsersByRole('customer'),
-          getDocs(query(collection(db, 'jobs'), orderBy('createdAt', 'desc'), limit(5))),
+          getDocs(query(collection(db, 'jobs'), orderBy('createdAt', 'desc'), limit(100))),
           getDocs(query(collection(db, 'users'), where('tierStatus', '==', 'trial')))
         ]);
 
-        const missions = jobsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        setRecentMissions(missions);
+        const allJobs = jobsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        const recentJobs = allJobs.slice(0, 5);
+        
+        // Calculate Market Volume
+        const totalVolume = allJobs.reduce((sum, job: any) => {
+          const budget = typeof job.budget === 'string' ? parseFloat(job.budget.replace(/[^0-9.]/g, '')) : (job.budget || 0);
+          const amount = job.amount || 0;
+          return sum + (amount || budget || 0);
+        }, 0);
+
+        const avgBudget = allJobs.length > 0 ? totalVolume / allJobs.length : 0;
+
+        setRecentMissions(recentJobs);
         setPendingCount(trialsSnap.size);
+        setMarketStats({ totalVolume, avgBudget });
 
         setStats([
           { label: 'Total Pros', value: pros.length.toLocaleString(), change: '+0', icon: Hammer, color: 'primary' },
           { label: 'Active Customers', value: customers.length.toLocaleString(), change: '+0', icon: Users, color: 'accent' },
-          { label: 'Market Volume', value: 'R 0.00', change: '+0%', icon: DollarSign, color: 'green' },
-          { label: 'Avg Feedback', value: '5.0', change: '+0', icon: CheckCircle2, color: 'blue' },
+          { label: 'Market Volume', value: `R ${totalVolume.toLocaleString()}`, change: 'Real-time', icon: DollarSign, color: 'green' },
+          { label: 'Avg Mission', value: `R ${avgBudget.toLocaleString()}`, change: 'Platform Avg', icon: CheckCircle2, color: 'blue' },
         ]);
       } catch (error) {
         console.error('Failed to fetch admin dashboard data:', error);
@@ -55,29 +68,85 @@ export default function AdminDashboardPage() {
     fetchData();
   }, []);
 
+  const handlePrint = () => {
+    window.print();
+  };
+
   return (
     <div className="space-y-12">
+      <style jsx global>{`
+        @media print {
+          nav, header, aside, .no-print, button {
+            display: none !important;
+          }
+          body, .min-h-screen {
+             background: white !important;
+             margin: 0 !important;
+             padding: 0 !important;
+          }
+          main {
+             padding: 0 !important;
+             margin: 0 !important;
+          }
+          .grid {
+             display: block !important;
+          }
+          .bg-white {
+             border: none !important;
+             box-shadow: none !important;
+          }
+          .rounded-[2.5rem], .rounded-[3rem], .rounded-[4rem] {
+             border-radius: 0 !important;
+          }
+          .stat-card {
+             border: 1px solid #e2e8f0 !important;
+             margin-bottom: 20px !important;
+             page-break-inside: avoid;
+          }
+          .print-header {
+             display: block !important;
+             margin-bottom: 40px !important;
+             border-bottom: 2px solid #000 !important;
+             padding-bottom: 20px !important;
+          }
+        }
+        .print-header {
+           display: none;
+        }
+      `}</style>
+
+      {/* Print-only Header */}
+      <div className="print-header">
+         <h1 className="text-3xl font-black uppercase italic italic tracking-tighter">Fix Link <span className="text-primary">Platform Pulse</span></h1>
+         <p className="text-sm font-bold text-slate-500 uppercase tracking-widest mt-2">{new Date().toLocaleDateString()} • Confidential Tactical Report</p>
+      </div>
+
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 no-print">
         <div>
           <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-xs mb-3 italic">
             <span className="w-8 h-[2px] bg-primary"></span>
-            Operational Intelligence
+            Platform Pulse
           </div>
           <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-slate-900 mb-4 uppercase italic">
-            Command <span className="text-primary">Center</span>
+            System <span className="text-primary">Intelligence</span>
           </h1>
           <p className="text-slate-500 font-medium max-w-xl">
             Real-time analytics and global fleet management for the Fix Link professional marketplace.
           </p>
         </div>
-        <div className="flex items-center gap-3 p-1.5 bg-white rounded-2xl shadow-sm border border-slate-100 self-start">
-           <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-xl text-[10px] font-black uppercase tracking-widest">
-              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-              Live Systems
-           </div>
-           <div className="px-4 py-2 text-slate-400 text-[10px] font-black uppercase tracking-widest">
-              v1.4.2-LEGEND
+        <div className="flex items-center gap-4 self-start">
+           <button 
+             onClick={handlePrint}
+             className="px-8 py-4 bg-white border border-slate-200 text-slate-900 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-primary hover:text-primary transition-all shadow-sm flex items-center gap-3"
+           >
+              Print Report
+           </button>
+           <div className="flex items-center gap-3 p-1.5 bg-white rounded-2xl shadow-sm border border-slate-100">
+              <div className="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-xl text-[10px] font-black uppercase tracking-widest">
+                 <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                 Live
+              </div>
            </div>
         </div>
       </div>
@@ -94,13 +163,13 @@ export default function AdminDashboardPage() {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: index * 0.1 }}
-            className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all group"
+            className="bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-xl transition-all group stat-card"
           >
             <div className="flex items-start justify-between mb-6">
-              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all bg-${stat.color}/10 text-${stat.color} group-hover:scale-110`}>
+              <div className={`w-14 h-14 rounded-2xl flex items-center justify-center transition-all bg-${stat.color === 'primary' ? 'primary' : 'slate-900'}/10 text-${stat.color === 'primary' ? 'primary' : 'slate-900'} group-hover:scale-110`}>
                 <stat.icon className="w-7 h-7" />
               </div>
-              <div className="px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[10px] font-black flex items-center gap-1">
+              <div className="px-3 py-1 bg-green-50 text-green-600 rounded-lg text-[10px] font-black flex items-center gap-1 no-print">
                 <TrendingUp className="w-3 h-3" />
                 {stat.change}
               </div>
@@ -115,12 +184,12 @@ export default function AdminDashboardPage() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Recent Activity */}
         <div className="lg:col-span-8 space-y-6">
-          <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm overflow-hidden relative">
-            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-[100px] -mr-32 -mt-32"></div>
+          <div className="bg-white rounded-[3rem] p-10 border border-slate-100 shadow-sm overflow-hidden relative stat-card">
+            <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full blur-[100px] -mr-32 -mt-32 no-print"></div>
             
             <div className="flex items-center justify-between mb-10 relative z-10">
-              <h2 className="text-2xl font-black tracking-tight uppercase italic">Recent <span className="text-primary">Missions</span></h2>
-              <button className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-slate-900 transition-colors">View All Activity</button>
+              <h2 className="text-2xl font-black tracking-tight uppercase italic">Platform <span className="text-primary">Pulse</span></h2>
+              <button className="text-[10px] font-black uppercase tracking-widest text-primary hover:text-slate-900 transition-colors no-print">View All Activity</button>
             </div>
 
             <div className="space-y-6 relative z-10">
@@ -156,7 +225,7 @@ export default function AdminDashboardPage() {
         </div>
 
         {/* System Health / Status */}
-        <div className="lg:col-span-4 space-y-6">
+        <div className="lg:col-span-4 space-y-6 no-print">
            <div className="bg-slate-900 rounded-[3rem] p-10 shadow-2xl relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[50px] -mr-16 -mt-16"></div>
               

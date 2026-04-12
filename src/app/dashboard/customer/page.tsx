@@ -12,47 +12,143 @@ import {
   Navigation,
   ShieldCheck,
   Zap,
-  ArrowRight
+  ArrowRight,
+  Bell,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { cn } from '@/lib/utils';
 import Link from 'next/link';
-import { getJobsByCustomer, getQuotesByJob } from '@/lib/db';
+import { cn } from '@/lib/utils';
+import { 
+  getJobsByCustomer, 
+  getQuotesByJob, 
+  markNotificationAsRead, 
+  deleteChat, 
+  repairJobFinancials,
+  db 
+} from '@/lib/db';
+import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
 import { formatDistanceToNow } from 'date-fns';
 
 export default function CustomerDashboard() {
   const { user, profile } = useAuth();
-  const [activeTab, setActiveTab] = useState<'jobs' | 'quotes'>('jobs');
+  const [activeTab, setActiveTab] = useState<'jobs' | 'quotes' | 'alerts' | 'comms'>('jobs');
   const [jobs, setJobs] = useState<any[]>([]);
   const [quotes, setQuotes] = useState<any[]>([]);
+  const [chats, setChats] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
   useEffect(() => {
-    async function loadData() {
-      if (!user) return;
-      try {
-        const customerJobs = await getJobsByCustomer(user.uid);
-        setJobs(customerJobs);
-        
-        // Fetch quotes for the most recent job for simplicity in this view, 
-        // or aggregate from all jobs if needed.
-        if (customerJobs.length > 0) {
-           const allQuotes: any[] = [];
-           for (const job of customerJobs) {
-              const jobQuotes = await getQuotesByJob(job.id);
-              allQuotes.push(...jobQuotes.map(q => ({ ...q, jobTitle: job.title })));
-           }
-           setQuotes(allQuotes);
-        }
-      } catch (err) {
-        console.error("Error loading dashboard data:", err);
-      } finally {
-        setLoading(false);
-      }
-    }
-    loadData();
+    if (!user) return;
+
+    const notifRef = collection(db, 'notifications');
+    const q = query(notifRef, where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(20));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const alerts = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      setNotifications(alerts);
+    });
+
+    // Chat Threads Listener (30-day edge-side policy)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const chatsRef = collection(db, 'chats');
+    const qChats = query(chatsRef, where('participants', 'array-contains', user.uid));
+    
+    const unsubscribeChats = onSnapshot(qChats, (snapshot) => {
+      const chatThreads = snapshot.docs
+        .map(doc => ({ ...doc.data(), id: doc.id } as any))
+        .filter(chat => {
+          if (!chat.lastMessageAt) return true;
+          const msgDate = chat.lastMessageAt?.toDate ? chat.lastMessageAt.toDate() : new Date(chat.lastMessageAt);
+          return msgDate >= thirtyDaysAgo;
+        })
+        .sort((a, b) => {
+          const aDate = a.lastMessageAt?.toDate ? a.lastMessageAt.toDate() : new Date(a.lastMessageAt || 0);
+          const bDate = b.lastMessageAt?.toDate ? b.lastMessageAt.toDate() : new Date(b.lastMessageAt || 0);
+          return bDate.getTime() - aDate.getTime();
+        });
+
+      setChats(chatThreads);
+    }, (error) => {
+      console.error("MISSION COMMS FAILURE [CUSTOMER]:", error);
+    });
+
+    return () => {
+      unsubscribe();
+      unsubscribeChats();
+    };
   }, [user]);
+
+  useEffect(() => {
+    if (!user) return;
+    setLoading(true);
+    
+    // Mission Radar (Real-time Job Listener)
+    const jobsRef = collection(db, 'jobs');
+    const qJobs = query(
+      jobsRef, 
+      where('customerId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribeJobs = onSnapshot(qJobs, async (snapshot) => {
+      const customerJobs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any));
+      setJobs(customerJobs);
+
+      // Refresh quotes for active mission set
+      const allQuotes: any[] = [];
+      for (const job of customerJobs) {
+         try {
+            const jobQuotes = await getQuotesByJob(job.id);
+            allQuotes.push(...jobQuotes.map(q => ({ ...q, jobTitle: job.title })));
+         } catch (quoteErr: any) {
+            if (quoteErr.code === 'permission-denied') {
+              console.warn(`PERMISSION DENIED: Missing quote metadata for ${job.id}. Attempting auto-repair.`);
+              await repairJobFinancials(job.id);
+              try {
+                const retry = await getQuotesByJob(job.id);
+                allQuotes.push(...retry.map(q => ({ ...q, jobTitle: job.title })));
+              } catch (e) { /* Fallback */ }
+            }
+         }
+      }
+      setQuotes(allQuotes);
+      setLoading(false);
+    }, (error) => {
+      console.error("MISSION RADAR FAILURE [JOBS]:", error);
+      setLoading(false);
+    });
+
+    return () => unsubscribeJobs();
+  }, [user]);
+
+  const unreadCount = notifications.filter(n => !n.read).length;
+
+  const handleAlertClick = async (notif: any) => {
+    if (!notif.read) {
+      await markNotificationAsRead(notif.id);
+    }
+    if (notif.chatId) {
+      router.push(`/chat?chatId=${notif.chatId}`);
+    } else if (notif.jobId) {
+      router.push(`/jobs/view?id=${notif.jobId}`);
+    }
+  };
+
+  const handleDeleteChat = async (e: React.MouseEvent, chatId: string) => {
+    e.stopPropagation();
+    if (!confirm("Scale back comms? This will permanently delete this mission thread.")) return;
+    try {
+      await deleteChat(chatId);
+    } catch (err) {
+      console.error("Chat deletion failed:", err);
+    }
+  };
+
+  const unreadMessages = notifications.filter(n => !n.read && n.type === 'new_message').length;
 
   if (loading) {
     return (
@@ -64,7 +160,6 @@ export default function CustomerDashboard() {
 
   const activeJobsCount = jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled').length;
   const totalQuotesCount = quotes.length;
-
 
   return (
     <div className="flex flex-col gap-10 py-8 max-w-2xl mx-auto md:max-w-none">
@@ -173,7 +268,61 @@ export default function CustomerDashboard() {
                 Recent Quotes
                 {activeTab === 'quotes' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-1.5 bg-primary rounded-full px-2" />}
               </button>
+              <button 
+                onClick={() => setActiveTab('comms')}
+                className={cn(
+                   "pb-6 font-black uppercase tracking-[0.2em] text-[10px] transition-all relative flex items-center gap-2",
+                   activeTab === 'comms' ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Mission Comms
+                {unreadMessages > 0 && (
+                  <span className="bg-primary text-white text-[8px] w-4 h-4 flex items-center justify-center rounded-full animate-pulse">
+                    {unreadMessages}
+                  </span>
+                )}
+                {activeTab === 'comms' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-1.5 bg-primary rounded-full px-2" />}
+              </button>
+              <button 
+                onClick={() => setActiveTab('alerts')}
+                className={cn(
+                   "pb-6 font-black uppercase tracking-[0.2em] text-[10px] transition-all relative flex items-center gap-2",
+                   activeTab === 'alerts' ? "text-primary" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Alerts 
+                {(unreadCount - unreadMessages) > 0 && (
+                  <span className="bg-primary text-white text-[8px] w-4 h-4 flex items-center justify-center rounded-full animate-pulse">
+                    {unreadCount - unreadMessages}
+                  </span>
+                )}
+                {activeTab === 'alerts' && <motion.div layoutId="tab" className="absolute bottom-0 left-0 right-0 h-1.5 bg-primary rounded-full px-2" />}
+              </button>
            </div>
+
+           {/* Activity Stream Banner */}
+           {notifications.filter(n => !n.read).length > 0 && (
+             <motion.div 
+               initial={{ opacity: 0, y: -20 }}
+               animate={{ opacity: 1, y: 0 }}
+               className="bg-primary p-6 rounded-[2rem] flex items-center justify-between group cursor-pointer overflow-hidden relative shadow-2xl shadow-primary/20"
+               onClick={() => setActiveTab('alerts')}
+             >
+                <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full blur-2xl -mr-16 -mt-16 group-hover:scale-150 transition-transform duration-700" />
+                <div className="flex items-center gap-4 relative">
+                   <div className="w-10 h-10 bg-white/20 rounded-xl flex items-center justify-center animate-bounce">
+                      <Bell className="w-5 h-5 text-white" />
+                   </div>
+                   <div>
+                      <p className="text-[9px] font-black uppercase tracking-[0.2em] text-white/50 leading-none mb-1 text-left">Recent Mission Activity</p>
+                      <h4 className="text-white font-black italic uppercase tracking-tighter text-sm leading-none text-left">
+                         {notifications.filter(n => !n.read).length} Unread Updates Pending
+                      </h4>
+                   </div>
+                </div>
+                <ArrowRight className="w-5 h-5 text-white/40 group-hover:text-white transition-all transform group-hover:translate-x-1" />
+             </motion.div>
+           )}
 
            <div className="space-y-6">
               <AnimatePresence mode="wait">
@@ -191,7 +340,7 @@ export default function CustomerDashboard() {
                            <p className="text-sm font-black uppercase tracking-widest text-muted-foreground italic">No active requests found</p>
                         </div>
                       ) : jobs.map((job) => (
-                        <div key={job.id} onClick={() => router.push(`/jobs/${job.id}`)} className="p-8 bg-white rounded-[3rem] border border-border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-8 group hover:shadow-2xl hover:border-primary/20 transition-all cursor-pointer relative overflow-hidden">
+                        <div key={job.id} onClick={() => router.push(`/jobs/view?id=${job.id}`)} className="p-8 bg-white rounded-[3rem] border border-border shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-8 group hover:shadow-2xl hover:border-primary/20 transition-all cursor-pointer relative overflow-hidden">
                            <div className="flex items-center gap-8">
                               <div className="w-20 h-20 rounded-3xl bg-muted/50 flex items-center justify-center text-primary shrink-0 group-hover:bg-primary group-hover:text-white transition-all duration-500">
                                  <Navigation className="w-10 h-10" />
@@ -208,11 +357,97 @@ export default function CustomerDashboard() {
                            <div className="flex items-center justify-between md:flex-col md:items-end gap-3 shrink-0">
                               <span className={cn(
                                  "px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                                 job.status === 'quoted' || job.status === 'estimated' ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-muted text-muted-foreground border-border"
+                                 job.status === 'quoted' || job.status === 'estimated' || job.status === 'active' ? "bg-blue-50 text-blue-600 border-blue-100" : "bg-muted text-muted-foreground border-border"
                               )}>
                                  {job.status}
                               </span>
                            </div>
+                        </div>
+                      ))}
+                    </motion.div>
+                 ) : activeTab === 'comms' ? (
+                   <motion.div 
+                     key="comms"
+                     initial={{ opacity: 0, x: 20 }}
+                     animate={{ opacity: 1, x: 0 }}
+                     exit={{ opacity: 0, x: -20 }}
+                     className="space-y-6"
+                   >
+                      {chats.length === 0 ? (
+                        <div className="p-12 text-center bg-muted/20 rounded-[3rem] border-2 border-dashed border-border">
+                           <MessageSquare className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-20" />
+                           <p className="text-sm font-black uppercase tracking-widest text-muted-foreground italic">No active comms indexed</p>
+                        </div>
+                      ) : chats.map((chat) => {
+                        const hasUnread = notifications.some(n => !n.read && n.chatId === chat.id);
+                        return (
+                          <div 
+                            key={chat.id} 
+                            onClick={() => router.push(`/chat?chatId=${chat.id}`)}
+                            className={cn(
+                               "p-8 bg-white border rounded-[3rem] flex items-center justify-between group cursor-pointer transition-all hover:shadow-2xl",
+                               hasUnread ? "border-primary/20 bg-primary/5" : "border-border"
+                            )}
+                          >
+                             <div className="flex items-center gap-6 overflow-hidden">
+                                <div className={cn(
+                                  "w-16 h-16 rounded-[1.5rem] flex items-center justify-center font-black text-xl italic shrink-0",
+                                  hasUnread ? "bg-primary text-white" : "bg-muted text-muted-foreground"
+                                )}>
+                                   {chat.tradesmanName?.charAt(0) || 'P'}
+                                </div>
+                                <div className="min-w-0">
+                                   <div className="flex items-center gap-2">
+                                     <h4 className="font-black text-slate-900 uppercase italic tracking-tight truncate">{chat.tradesmanName}</h4>
+                                     {hasUnread && <div className="w-2 h-2 bg-primary rounded-full animate-ping" />}
+                                   </div>
+                                   <p className="text-[10px] font-black text-primary uppercase tracking-widest truncate opacity-60">Mission: {chat.jobTitle}</p>
+                                   <p className="text-[11px] text-slate-400 font-bold italic truncate mt-1">{chat.lastMessage || 'Waiting for briefing...'}</p>
+                                </div>
+                             </div>
+                             <div className="flex items-center gap-4 shrink-0">
+                                <button 
+                                  onClick={(e) => handleDeleteChat(e, chat.id)}
+                                  className="p-3 text-slate-200 hover:text-red-500 transition-colors"
+                                >
+                                   <Trash2 className="w-5 h-5" />
+                                </button>
+                                <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-primary transition-colors" />
+                             </div>
+                          </div>
+                        );
+                      })}
+                    </motion.div>
+                 ) : activeTab === 'alerts' ? (
+                   <motion.div 
+                     key="alerts"
+                     initial={{ opacity: 0, x: 20 }}
+                     animate={{ opacity: 1, x: 0 }}
+                     exit={{ opacity: 0, x: -20 }}
+                     className="space-y-6"
+                   >
+                      {notifications.length === 0 ? (
+                        <div className="p-12 text-center bg-muted/20 rounded-[3rem] border-2 border-dashed border-border">
+                           <Bell className="w-12 h-12 text-muted-foreground mx-auto mb-4 opacity-20" />
+                           <p className="text-sm font-black uppercase tracking-widest text-muted-foreground italic">No new alerts</p>
+                        </div>
+                      ) : notifications.map((n) => (
+                        <div 
+                           key={n.id} 
+                           onClick={() => handleAlertClick(n)}
+                           className={cn(
+                               "p-8 bg-white border rounded-[2.5rem] flex items-center justify-between group cursor-pointer transition-all",
+                               n.read ? "border-border" : "border-primary/20 bg-primary/5 shadow-xl"
+                           )}
+                        >
+                           <div className="flex items-center gap-6">
+                              <Bell className={cn("w-6 h-6", n.read ? "text-slate-300" : "text-primary")} />
+                              <div>
+                                 <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">{n.title}</p>
+                                 <h4 className="font-black text-slate-900 uppercase italic tracking-tight leading-tight">{n.message}</h4>
+                              </div>
+                           </div>
+                           <ArrowRight className="w-5 h-5 text-slate-300 group-hover:text-primary transition-colors" />
                         </div>
                       ))}
                     </motion.div>
@@ -255,7 +490,7 @@ export default function CustomerDashboard() {
 
                            <div className="flex gap-4">
                               <button 
-                                onClick={() => router.push(`/jobs/${quote.jobId}/estimate`)}
+                                onClick={() => router.push(`/jobs/view/estimate?id=${quote.jobId}`)}
                                 className="flex-2 py-5 bg-primary text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
                               >
                                  Review Quote <ArrowRight className="w-4 h-4" />

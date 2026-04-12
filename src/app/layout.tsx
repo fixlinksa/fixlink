@@ -4,6 +4,7 @@ import { AuthProvider } from "@/context/AuthContext";
 import Script from "next/script";
 import "./globals.css";
 import Navbar from "@/components/shared/navbar";
+import NotificationMonitor from "@/components/shared/NotificationMonitor";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,10 +43,11 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-background text-foreground">
         <Script
           src={`https://maps.googleapis.com/maps/api/js?key=${process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY}&libraries=places`}
-          strategy="beforeInteractive"
+          strategy="afterInteractive"
         />
         <AuthProvider>
           <Navbar />
+          <NotificationMonitor />
           <main className="flex-1 pt-24">
             {children}
           </main>

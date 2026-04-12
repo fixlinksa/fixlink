@@ -51,11 +51,14 @@ export default function ProjectsHistoryPage() {
     }
   };
 
-  const filteredProjects = projects.filter(e => 
-    e.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.location?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProjects = projects.filter(e => {
+    const locString = typeof e.location === 'string' ? e.location : (e.location?.address || '');
+    return (
+      e.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      e.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      locString.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+  });
 
   if (authLoading || loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -119,7 +122,7 @@ export default function ProjectsHistoryPage() {
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: idx * 0.05 }}
                   key={project.id}
-                  onClick={() => router.push(`/jobs/${project.id}`)}
+                  onClick={() => router.push(`/jobs/view?id=${project.id}`)}
                   className="bg-white border border-slate-100 rounded-[3rem] p-8 md:p-10 shadow-sm hover:shadow-xl hover:border-primary/20 transition-all group cursor-pointer flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden"
                 >
                    <div className="flex items-center gap-8 flex-1 relative z-10">
@@ -142,7 +145,10 @@ export default function ProjectsHistoryPage() {
                          </div>
                          <h3 className="text-2xl font-black uppercase italic tracking-tight text-slate-900 group-hover:text-primary transition-colors">{project.customerName || project.title || 'Mission Alpha'}</h3>
                          <div className="flex flex-wrap gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic opacity-60">
-                            <span className="flex items-center gap-2"><MapPin className="w-3.5 h-3.5" /> {project.location || 'Remote Deployment'}</span>
+                            <span className="flex items-center gap-2">
+                                <MapPin className="w-3.5 h-3.5" /> 
+                                {typeof project.location === 'string' ? project.location : (project.location?.address || 'Remote Deployment')}
+                            </span>
                             <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> {project.createdAt?.seconds ? new Date(project.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}</span>
                          </div>
                       </div>
