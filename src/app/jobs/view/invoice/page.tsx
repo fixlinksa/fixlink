@@ -16,7 +16,8 @@ import {
   CheckCircle2,
   AlertCircle,
   Loader2,
-  Percent
+  Percent,
+  Mail
 } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -51,6 +52,7 @@ function InvoiceContent() {
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [isFinalizing, setIsFinalizing] = useState(false);
+  const [isEmailing, setIsEmailing] = useState(false);
   const [notes, setNotes] = useState('');
   const [recentCustomers, setRecentCustomers] = useState<{ uid: string, name: string }[]>([]);
   const [isCustomerSelectOpen, setIsCustomerSelectOpen] = useState(false);
@@ -323,6 +325,50 @@ function InvoiceContent() {
     }
   };
 
+  const handleEmailPdf = async () => {
+    if (!job?.customerEmail) {
+      alert("Please provide a client email address first.");
+      return;
+    }
+    const input = document.getElementById('pdf-document');
+    if (!input) return;
+
+    setIsEmailing(true);
+    try {
+      const canvas = await html2canvas(input, { scale: 1.5, useCORS: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.8);
+      const pdf = new jsPDF('p', 'pt', 'a4');
+      const pdfWidth = pdf.internal.pageSize.getWidth();
+      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+      const pdfBase64 = pdf.output('datauristring');
+
+      const response = await fetch('/api/email/document', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: job.customerEmail,
+          proName: profile?.businessName || profile?.fullName || 'Professional',
+          type: 'Invoice',
+          pdfBase64,
+          filename: `invoice_${job.id}.pdf`
+        })
+      });
+
+      if (response.ok) {
+        alert(`Invoice successfully delivered to ${job.customerEmail}`);
+      } else {
+        const err = await response.json();
+        throw new Error(err.error || 'Failed to deliver email');
+      }
+    } catch (err: any) {
+      console.error('Email delivery failed:', err);
+      alert("Mission Comms Error: " + err.message);
+    } finally {
+      setIsEmailing(false);
+    }
+  };
+
   if (loading) return (
      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Loader2 className="w-12 h-12 text-primary animate-spin" />
@@ -364,12 +410,22 @@ function InvoiceContent() {
                     ID: {id.slice(0, 8)}
                  </div>
               </div>
-              <button 
-                 onClick={handleDownloadPdf}
-                 className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 shadow-sm rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-primary transition-all text-slate-600 hover:text-primary"
-              >
-                 <Download className="w-4 h-4" /> Download PDF
-              </button>
+              <div className="flex flex-wrap items-center gap-3">
+                 <button 
+                    onClick={handleDownloadPdf}
+                    className="flex items-center justify-center gap-2 px-6 py-3 bg-white border border-slate-200 shadow-sm rounded-2xl text-[10px] font-black uppercase tracking-widest hover:border-primary transition-all text-slate-600 hover:text-primary"
+                 >
+                    <Download className="w-4 h-4" /> Download PDF
+                 </button>
+                 <button 
+                    onClick={handleEmailPdf}
+                    disabled={isEmailing}
+                    className="flex items-center justify-center gap-2 px-6 py-3 bg-primary text-white shadow-xl shadow-primary/10 rounded-2xl text-[10px] font-black uppercase tracking-widest hover:scale-105 active:scale-95 transition-all disabled:opacity-50 disabled:scale-100"
+                 >
+                    {isEmailing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                    Email to Client
+                 </button>
+              </div>
            </div>
         </div>
 

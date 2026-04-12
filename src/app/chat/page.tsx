@@ -10,7 +10,10 @@ import {
   CheckCheck,
   MessageCircle,
   Loader2,
-  Trash2
+  Trash2,
+  Paperclip,
+  FileText,
+  ExternalLink
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
@@ -27,7 +30,7 @@ import {
   doc,
   getDoc
 } from 'firebase/firestore';
-import { sendMessage, getChatThreads } from '@/lib/db';
+import { sendMessage, getChatThreads, getEstimatesByJob, getInvoicesByJob } from '@/lib/db';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 
@@ -38,7 +41,9 @@ function ChatContent() {
   const [chats, setChats] = useState<any[]>([]);
   const [messages, setMessages] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
+  const [isAttachOpen, setIsAttachOpen] = useState(false);
+  const [availableDocs, setAvailableDocs] = useState<any[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
   const searchParams = useSearchParams();
   const router = useRouter();
   const chatIdParam = searchParams.get('chatId');
@@ -133,6 +138,48 @@ function ChatContent() {
       setMessage('');
     } catch (err: any) {
       alert(err.message || "Failed to send message.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAttachClick = async () => {
+    if (!selectedChat || profile?.role !== 'tradesman') return;
+    
+    setIsAttachOpen(true);
+    setLoadingDocs(true);
+    try {
+      const [estimates, invoices] = await Promise.all([
+        getEstimatesByJob(selectedChat.jobId),
+        getInvoicesByJob(selectedChat.jobId)
+      ]);
+      
+      const combined = [
+        ...estimates.map(e => ({ ...e, docType: 'Estimate' })),
+        ...invoices.map(i => ({ ...i, docType: 'Invoice' }))
+      ];
+      setAvailableDocs(combined);
+    } catch (err) {
+      console.error("Failed to load mission docs:", err);
+    } finally {
+      setLoadingDocs(false);
+    }
+  };
+
+  const sendAttachment = async (doc: any) => {
+    if (!selectedChat || !user || !profile) return;
+    
+    setSubmitting(true);
+    try {
+      await sendMessage(selectedChat.id, user.uid, `📎 Attached ${doc.docType}`, profile.role, {
+        type: 'document',
+        docType: doc.docType,
+        docId: doc.id,
+        amount: doc.amount || 0
+      });
+      setIsAttachOpen(false);
+    } catch (err: any) {
+      alert("Failed to attach document.");
     } finally {
       setSubmitting(false);
     }
@@ -293,7 +340,42 @@ function ChatContent() {
                       ? "bg-slate-900 text-white rounded-tr-none" 
                       : "bg-white text-slate-900 border border-slate-100 rounded-tl-none"
                   )}>
-                    <p className="text-[13px] font-bold leading-relaxed italic">{msg.text}</p>
+                    {msg.type === 'document' ? (
+                      <div className="space-y-4">
+                        <div className="flex items-center gap-4">
+                          <div className={cn(
+                            "w-12 h-12 rounded-2xl flex items-center justify-center",
+                            msg.senderId === user?.uid ? "bg-white/10" : "bg-slate-100"
+                          )}>
+                             <FileText className="w-6 h-6 text-primary" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-widest italic opacity-60">Mission {msg.docType}</p>
+                            <p className="text-sm font-black tracking-tight">{msg.docType} #{msg.docId.slice(-6)}</p>
+                          </div>
+                        </div>
+                        <div className={cn(
+                          "p-4 rounded-xl border",
+                          msg.senderId === user?.uid ? "bg-white/5 border-white/10" : "bg-slate-50 border-slate-100"
+                        )}>
+                           <div className="flex justify-between items-center mb-4">
+                              <span className="text-[9px] font-black uppercase italic opacity-60">Total Value</span>
+                              <span className="text-sm font-black">R {msg.amount?.toFixed(2)}</span>
+                           </div>
+                           <button 
+                             onClick={() => router.push(`/jobs/view/${msg.docType.toLowerCase()}?id=${selectedChat.jobId}`)}
+                             className={cn(
+                               "w-full py-3 rounded-lg flex items-center justify-center gap-2 text-[10px] font-black uppercase tracking-widest transition-all",
+                               msg.senderId === user?.uid ? "bg-white text-slate-900" : "bg-primary text-white shadow-lg shadow-primary/20"
+                             )}
+                           >
+                              View Document <ExternalLink className="w-3 h-3" />
+                           </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="text-[13px] font-bold leading-relaxed italic">{msg.text}</p>
+                    )}
                     <div className={cn(
                       "mt-4 flex items-center gap-2 text-[8px] font-black uppercase tracking-[0.2em] italic",
                       msg.senderId === user?.uid ? "text-white/30 justify-end" : "text-slate-300 justify-start"
@@ -308,8 +390,61 @@ function ChatContent() {
             </div>
 
             {/* Input Bar */}
-            <footer className="p-6 md:p-12 bg-white border-t border-slate-100">
+            <footer className="p-6 md:p-12 bg-white border-t border-slate-100 relative">
+               <AnimatePresence>
+                 {isAttachOpen && (
+                   <motion.div 
+                     initial={{ opacity: 0, y: 20 }}
+                     animate={{ opacity: 1, y: 0 }}
+                     exit={{ opacity: 0, y: 20 }}
+                     className="absolute bottom-full left-6 right-6 mb-4 bg-white rounded-[2.5rem] shadow-2xl border border-slate-100 overflow-hidden z-20"
+                   >
+                     <div className="p-6 border-b border-slate-50 flex items-center justify-between">
+                        <h4 className="text-[10px] font-black uppercase tracking-widest italic text-slate-400">Mission Documentation</h4>
+                        <button onClick={() => setIsAttachOpen(false)} className="text-[9px] font-black uppercase italic text-primary">Close</button>
+                     </div>
+                     <div className="max-h-64 overflow-y-auto p-4 space-y-2">
+                        {loadingDocs ? (
+                          <div className="py-8 flex justify-center"><Loader2 className="w-6 h-6 text-primary animate-spin" /></div>
+                        ) : availableDocs.length === 0 ? (
+                          <div className="py-12 text-center text-[10px] font-black uppercase tracking-widest italic opacity-30">No generated documents found for this mission.</div>
+                        ) : availableDocs.map(doc => (
+                          <button 
+                            key={doc.id}
+                            onClick={() => sendAttachment(doc)}
+                            className="w-full flex items-center justify-between p-5 rounded-2xl border border-slate-50 hover:border-primary/20 hover:bg-slate-50 transition-all text-left group"
+                          >
+                             <div className="flex items-center gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-slate-100 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
+                                   <FileText className="w-5 h-5" />
+                                </div>
+                                <div>
+                                   <p className="text-[10px] font-black uppercase italic text-slate-400">{doc.docType}</p>
+                                   <p className="text-[11px] font-bold text-slate-700">#{doc.id.slice(-6)}</p>
+                                </div>
+                             </div>
+                             <div className="text-right">
+                                <p className="text-[11px] font-black text-slate-900">R {doc.amount?.toFixed(2)}</p>
+                                <p className="text-[9px] font-bold text-slate-400">ID: {doc.id.slice(0, 8)}</p>
+                             </div>
+                          </button>
+                        ))}
+                     </div>
+                   </motion.div>
+                 )}
+               </AnimatePresence>
             <div className="flex items-center gap-4 bg-slate-50 p-2 pl-6 rounded-[2.5rem] border border-slate-100 focus-within:ring-2 focus-within:ring-primary/20 focus-within:bg-white focus-within:shadow-2xl focus-within:shadow-primary/5 transition-all">
+                {profile?.role === 'tradesman' && (
+                  <button 
+                    onClick={handleAttachClick}
+                    className={cn(
+                      "p-3 transition-colors",
+                      isAttachOpen ? "text-primary" : "text-slate-300 hover:text-primary"
+                    )}
+                  >
+                    <Paperclip className="w-6 h-6" />
+                  </button>
+                )}
                 <button className="p-3 text-slate-300 hover:text-primary transition-colors">
                   <ImageIcon className="w-6 h-6" />
                 </button>

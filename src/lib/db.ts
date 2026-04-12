@@ -623,25 +623,12 @@ export const createChatThread = async (jobId: string, customerId: string, trades
 };
 
 
-export const sendMessage = async (chatId: string, senderId: string, text: string, role: string) => {
+export const sendMessage = async (chatId: string, senderId: string, text: string, role: string, metadata?: any) => {
   const chatRef = doc(db, 'chats', chatId);
   const chatSnap = await getDoc(chatRef);
   if (!chatSnap.exists()) throw new Error('Chat thread does not exist');
   
   const chatData = chatSnap.data();
-  
-  // Permission Check: Both professional and customer can make first contact if assigned.
-  const isLeadResponse = chatData.lastMessage === '' && !chatData.messageCount;
-  
-  // Tradesman can initiate if it's a lead or if they are assigned.
-  if (role === 'tradesman' && (isLeadResponse || chatData.tradesmanId === senderId)) {
-    console.log('Professional initiating communication');
-  } else if (role === 'customer' && chatData.customerId === senderId) {
-    console.log('Customer initiating communication');
-  } else if (!chatData.messageCount || chatData.messageCount === 0) {
-    // If it's a first message, we generally allow it if they are a participant.
-    console.log('Initiating first contact');
-  }
   
   const messagesRef = collection(db, 'chats', chatId, 'messages');
   const messageData = {
@@ -650,14 +637,15 @@ export const sendMessage = async (chatId: string, senderId: string, text: string
     createdAt: new Date(),
     role,
     customerId: chatData.customerId,
-    tradesmanId: chatData.tradesmanId
+    tradesmanId: chatData.tradesmanId,
+    ...metadata
   };
   
   await setDoc(doc(messagesRef), sanitizeData(messageData));
   
   // Update chat thread header
   await updateDoc(chatRef, {
-    lastMessage: text,
+    lastMessage: metadata?.type === 'document' ? `📎 Attached ${metadata.docType}` : text,
     lastMessageAt: new Date(),
     messageCount: (chatData.messageCount || 0) + 1
   });
@@ -668,12 +656,26 @@ export const sendMessage = async (chatId: string, senderId: string, text: string
     userId: recipientId,
     type: 'new_message',
     title: 'New Message',
-    message: text.length > 50 ? text.substring(0, 50) + '...' : text,
+    message: metadata?.type === 'document' ? `Attached ${metadata.docType}` : (text.length > 50 ? text.substring(0, 50) + '...' : text),
     chatId,
     jobId: chatData.jobId,
     createdAt: new Date(),
     read: false
   }));
+};
+
+export const getInvoicesByJob = async (jobId: string) => {
+  const invoicesRef = collection(db, 'jobs', jobId, 'invoices');
+  const q = query(invoicesRef, orderBy('createdAt', 'desc'));
+  const snap = await getDocs(q);
+  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+};
+
+export const getEstimatesByJob = async (jobId: string) => {
+  const estimatesRef = collection(db, 'jobs', jobId, 'estimates');
+  const q = query(estimatesRef, orderBy('createdAt', 'desc'));
+  const snap = await getDocs(q);
+  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
 };
 
 export const getChatThreads = async (userId: string, role: string) => {
