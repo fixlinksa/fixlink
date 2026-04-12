@@ -373,8 +373,10 @@ export const deleteJob = async (jobId: string) => {
 
 export const deleteChat = async (chatId: string) => {
   await deleteDoc(doc(db, 'chats', chatId));
-  // Messages are sub-collection, Firestore doesn't cascade delete them 
-  // but they won't show up in UI because the parent chat is gone.
+};
+
+export const deleteMessage = async (chatId: string, messageId: string) => {
+  await deleteDoc(doc(db, 'chats', chatId, 'messages', messageId));
 };
 
 export const declineJob = async (jobId: string) => {

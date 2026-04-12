@@ -33,7 +33,7 @@ import {
   doc,
   getDoc
 } from 'firebase/firestore';
-import { sendMessage, getChatThreads, getEstimatesByJob, getInvoicesByJob, getJob, getUserProfile } from '@/lib/db';
+import { sendMessage, getChatThreads, getEstimatesByJob, getInvoicesByJob, getJob, getUserProfile, deleteChat, deleteMessage } from '@/lib/db';
 import { storage } from '@/lib/firebase';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { PdfDocument } from '@/components/PdfDocument';
@@ -248,6 +248,25 @@ function ChatContent() {
     }
   };
 
+  const handleDeleteMessage = async (messageId: string) => {
+    if (!selectedChat || !confirm("Permanently remove this message from the mission log?")) return;
+    try {
+      await deleteMessage(selectedChat.id, messageId);
+    } catch (err) {
+      alert("Failed to remove message.");
+    }
+  };
+
+  const handleTerminateSession = async () => {
+    if (!selectedChat || !confirm("Permanently scale back this mission thread?")) return;
+    try {
+       await deleteChat(selectedChat.id);
+       setSelectedChat(null);
+    } catch (err) {
+       alert("Session termination failed.");
+    }
+  };
+
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !selectedChat || !user || !profile) return;
@@ -393,16 +412,7 @@ function ChatContent() {
               </div>
               <div className="flex items-center gap-1 md:gap-3">
                  <button 
-                   onClick={async () => {
-                     if (!confirm("Permanently scale back this mission thread?")) return;
-                     try {
-                        const { deleteChat } = await import('@/lib/db');
-                        await deleteChat(selectedChat.id);
-                        setSelectedChat(null);
-                     } catch (err) {
-                        alert("Session termination failed.");
-                     }
-                   }}
+                   onClick={handleTerminateSession}
                    className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-white border border-red-50 text-red-400 hover:bg-red-50 hover:text-red-500 transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic"
                  >
                     <Trash2 className="w-4 h-4" />
@@ -522,12 +532,23 @@ function ChatContent() {
                     {!msg.type && (
                       <p className="text-[12px] md:text-[13px] font-bold leading-relaxed italic">{msg.text}</p>
                     )}
+                    
                     <div className={cn(
-                      "mt-4 flex items-center gap-2 text-[8px] font-black uppercase tracking-[0.2em] italic",
+                      "mt-4 flex items-center gap-3 text-[8px] font-black uppercase tracking-[0.2em] italic",
                       msg.senderId === user?.uid ? "text-white/30 justify-end" : "text-slate-300 justify-start"
                     )}>
                       {msg.createdAt?.toDate ? formatDistanceToNow(msg.createdAt.toDate(), { addSuffix: true }) : 'Sending...'}
-                      {msg.senderId === user?.uid && <CheckCheck className="w-3.5 h-3.5" />}
+                      {msg.senderId === user?.uid && (
+                        <div className="flex items-center gap-2">
+                           <CheckCheck className="w-3.5 h-3.5" />
+                           <button 
+                             onClick={() => handleDeleteMessage(msg.id)}
+                             className="p-1 hover:text-red-400 transition-colors"
+                           >
+                              <Trash2 className="w-3 h-3" />
+                           </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </motion.div>
