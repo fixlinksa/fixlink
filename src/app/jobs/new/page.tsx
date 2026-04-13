@@ -22,6 +22,7 @@ import { Loader2 } from 'lucide-react';
 
 import { TRADES } from '@/lib/constants';
 import LocationSearch from '@/components/jobs/LocationSearch';
+import { smartCompressImage } from '@/lib/image-utils';
 
 export default function NewJobPage() {
   const [step, setStep] = useState(1);
@@ -46,33 +47,6 @@ export default function NewJobPage() {
   const { user } = useAuth();
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const compressImage = async (file: File): Promise<string> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.readAsDataURL(file);
-      reader.onload = (event) => {
-        const img = new Image();
-        img.src = event.target?.result as string;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const MAX_WIDTH = 1200;
-          let width = img.width;
-          let height = img.height;
-
-          if (width > MAX_WIDTH) {
-            height *= MAX_WIDTH / width;
-            width = MAX_WIDTH;
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.1));
-        };
-      };
-    });
-  };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -80,7 +54,7 @@ export default function NewJobPage() {
 
     setIsUploading(true);
     try {
-      const compressedBase64 = await compressImage(file);
+      const compressedBase64 = await smartCompressImage(file);
       const storageRef = ref(storage, `jobs/${user.uid}/${Date.now()}-${file.name}`);
       await uploadString(storageRef, compressedBase64, 'data_url');
       const url = await getDownloadURL(storageRef);

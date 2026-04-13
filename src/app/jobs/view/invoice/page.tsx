@@ -373,7 +373,7 @@ function InvoiceContent() {
       }
     } catch (err: any) {
       console.error('Email delivery failed:', err);
-      alert("Mission Comms Error: " + err.message);
+      alert("Secure Chat Error: " + err.message);
     } finally {
       setIsEmailing(false);
     }

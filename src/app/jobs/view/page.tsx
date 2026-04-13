@@ -157,10 +157,19 @@ function JobDetailContent() {
     }
   };
 
-  const handleOpenComms = async () => {
-     if (!user || !job) return;
+  const handleOpenChat = async () => {
+     if (!job?.customerId) return;
+     
+     // Determine operative ID: use assigned pro OR current pro if viewing a lead
+     const effectiveTradesmanId = job.tradesmanId || (isTradesmanView ? user?.uid : null);
+     
+     if (!effectiveTradesmanId) {
+        console.warn("COMMUNICATIONS ABORTED: No tradesman identity linked to this session.");
+        return;
+     }
+
      try {
-        const chatId = await createChatThread(job.id, job.customerId, user.uid);
+        const chatId = await createChatThread(job.id, job.customerId, effectiveTradesmanId);
         router.push(`/chat?chatId=${chatId}`);
      } catch (err) {
         console.error("Chat initiation failed:", err);
@@ -260,7 +269,7 @@ function JobDetailContent() {
                      </div>
                   ) : job.tradesmanId && (
                       <button 
-                         onClick={handleOpenComms}
+                         onClick={handleOpenChat}
                          className="px-8 py-5 bg-primary text-white rounded-[2rem] font-black text-xs uppercase tracking-widest flex items-center gap-3 hover:scale-105 active:scale-95 shadow-2xl shadow-primary/20 transition-all"
                       >
                          <MessageCircle className="w-4 h-4" /> Message Professional
@@ -414,7 +423,7 @@ function JobDetailContent() {
                                  ★ 4.9
                               </div>
                               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic">
-                                {isTradesmanView ? '(Verified Fixer)' : '(Fix Link Elite)'}
+                               {isTradesmanView ? '(Verified Customer)' : '(Fix Link Elite)'}
                               </span>
                            </div>
                         </div>
@@ -422,9 +431,9 @@ function JobDetailContent() {
 
                      <div className="pt-8 border-t border-slate-50 space-y-4">
                         <button 
-                           onClick={handleOpenComms}
+                           onClick={handleOpenChat}
                            className="w-full py-5 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-black/10">
-                           <MessageCircle className="w-5 h-5" /> Open Mission Comms
+                           <MessageCircle className="w-5 h-5" /> Open Secure Chat
                         </button>
                         {isTradesmanView && isAssigned && (
                            <button 
@@ -561,8 +570,10 @@ function JobDetailContent() {
                         await completeJobWithRating(job.id, rating, review);
                         setShowRatingModal(false);
                         loadJob();
-                      } catch (err) {
-                        alert("Failed to complete job. Please try again.");
+                      } catch (err: any) {
+                        const errorMsg = err?.message || "Internal Protocol Failure";
+                        alert(`Failed to complete mission: ${errorMsg}. Please re-synchronize and try again.`);
+                        console.error("Mission Completion Error:", err);
                       } finally {
                         setSubmitting(false);
                       }

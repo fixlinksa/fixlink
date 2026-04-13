@@ -161,8 +161,8 @@ function EstimateContent() {
              location: customerProfile.address || customerProfile.location || '',
              locationData: { 
                 address: customerProfile.address || (typeof customerProfile.location === 'object' ? customerProfile.location?.address : customerProfile.location) || '',
-                lat: (customerProfile as any).locationData?.lat || customerProfile.location?.lat || 0,
-                lng: (customerProfile as any).locationData?.lng || customerProfile.location?.lng || 0
+                lat: (customerProfile as any).locationData?.lat || (typeof customerProfile.location === 'object' ? customerProfile.location?.lat : 0) || 0,
+                lng: (customerProfile as any).locationData?.lng || (typeof customerProfile.location === 'object' ? customerProfile.location?.lng : 0) || 0
              }
           });
        }
@@ -368,7 +368,7 @@ function EstimateContent() {
       }
     } catch (err: any) {
       console.error('Email delivery failed:', err);
-      alert("Mission Comms Error: " + err.message);
+      alert("Secure Chat Error: " + err.message);
     } finally {
       setIsEmailing(false);
     }
@@ -515,6 +515,8 @@ function EstimateContent() {
                            />
                          </div>
                          <LocationSearch 
+                           key={`loc-${job?.customerId || 'draft'}-${job?.customerAddress || 'none'}`}
+                           defaultValue={job?.customerAddress}
                            placeholder="Full Address / Location" 
                            onLocationSelect={(address, lat, lng) => {
                               setJob({ ...job!, customerAddress: address, location: address, locationData: { address, lat, lng } });

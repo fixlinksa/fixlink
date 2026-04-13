@@ -42,6 +42,7 @@ export default function OnboardingPage() {
     website: '',
     isVatRegistered: false,
   });
+  const [coordinates, setCoordinates] = useState<{lat: number, lng: number} | null>(null);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -97,10 +98,14 @@ export default function OnboardingPage() {
         role: selectedRole,
         isCompany: isCompany === true,
         trade: selectedTrades[0] || undefined, // Keep single trade for backwards compatibility
-        trades: selectedTrades,
         tier: 'starter', // Default tier for new professionals
         onboardingCompleted: true,
         ...formData,
+        location: coordinates ? { 
+          address: formData.address, 
+          lat: coordinates.lat, 
+          lng: coordinates.lng 
+        } : undefined,
         imageUrl: user.photoURL || undefined,
       });
       
@@ -301,10 +306,17 @@ export default function OnboardingPage() {
                       onPlaceSelected={(place: any) => {
                          if (place?.formatted_address) {
                             setFormData({ ...formData, address: place.formatted_address });
+                            if (place.geometry?.location) {
+                               setCoordinates({
+                                  lat: place.geometry.location.lat(),
+                                  lng: place.geometry.location.lng()
+                               });
+                            }
                          }
                       }}
                       options={{
                         types: ["address"],
+                        fields: ["address_components", "geometry", "formatted_address"]
                       }}
                       placeholder="Search Permanent Street Address..."
                       defaultValue={formData.address}

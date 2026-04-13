@@ -12,7 +12,19 @@ import { markNotificationAsRead } from '@/lib/db';
 export default function NotificationMonitor() {
   const { user } = useAuth();
   const [activeNotification, setActiveNotification] = useState<any>(null);
+  const [lastNotifId, setLastNotifId] = useState<string | null>(null);
   const router = useRouter();
+
+  // Audio helper for notifications
+  const playAlert = () => {
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(e => console.log('Audio playback requires user interaction first.'));
+    } catch (e) {
+      console.error('Audio engine failure:', e);
+    }
+  };
 
   useEffect(() => {
     if (!user) return;
@@ -45,6 +57,13 @@ export default function NotificationMonitor() {
 
         if (diff < 30) {
           setActiveNotification(notif);
+          
+          // Play sound for new unseen notifications
+          if (notif.id !== lastNotifId) {
+            playAlert();
+            setLastNotifId(notif.id);
+          }
+
           // Auto-hide after 8 seconds
           const timer = setTimeout(() => {
             setActiveNotification(null);

@@ -55,11 +55,12 @@ export default function LeadsPage() {
     }
   };
 
-  const handleContact = async (lead: any) => {
+  const handleContact = async (e: React.MouseEvent, lead: any) => {
+    e.stopPropagation();
     if (!user || !profile) return;
     try {
       const chatId = await createChatThread(lead.jobId, lead.customerId, user.uid);
-      router.push(`/messages?chatId=${chatId}`);
+      router.push(`/chat?chatId=${chatId}`);
     } catch (error) {
       console.error('Error creating chat:', error);
     }
@@ -187,10 +188,10 @@ export default function LeadsPage() {
 
               <div className="w-full md:w-auto flex flex-col gap-3 min-w-[200px]">
                 <button 
-                  onClick={() => handleContact(lead)}
+                  onClick={(e) => handleContact(e, lead)}
                   className="w-full py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-accent hover:shadow-xl transition-all active:scale-95"
                 >
-                  <MessageCircle className="w-4 h-4" /> Deploy Comms
+                  <MessageCircle className="w-4 h-4" /> Open Chat
                 </button>
                 <div className="flex items-center justify-center gap-4 text-[9px] font-black text-slate-300 uppercase tracking-widest italic pt-2">
                   <span className="flex items-center gap-1"><Clock className="w-3 h-3" /> SECURED 2H AGO</span>

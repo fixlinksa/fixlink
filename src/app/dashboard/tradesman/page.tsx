@@ -318,6 +318,55 @@ export default function TradesmanDashboard() {
          </div>
       </section>
 
+      {/* Membership Intelligence Card */}
+      <section className="bg-white border-2 border-slate-100 rounded-[3.5rem] p-10 shadow-sm relative overflow-hidden group">
+         <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-full blur-3xl -mr-32 -mt-32 opacity-50" />
+         <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative">
+            <div className="flex items-center gap-6">
+               <div className={cn(
+                 "w-20 h-20 rounded-3xl flex items-center justify-center text-white shadow-2xl",
+                 profile?.tier === 'legend' ? "bg-accent shadow-accent/20" : 
+                 profile?.tier === 'missing' ? "bg-primary shadow-primary/20" : "bg-slate-900 shadow-slate-900/20"
+               )}>
+                  {profile?.tier === 'legend' ? <Star className="w-10 h-10" /> : 
+                   profile?.tier === 'missing' ? <Zap className="w-10 h-10" /> : <Layers className="w-10 h-10" />}
+               </div>
+               <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">
+                      {profile?.tier === 'legend' ? 'Link Legend' : 
+                       profile?.tier === 'missing' ? 'Link Pro' : 'Link Starter'}
+                    </h3>
+                    {profile?.tierStatus === 'trial' && (
+                      <span className="px-3 py-1 bg-accent/10 text-accent rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
+                        <Clock className="w-3 h-3" /> Trial Active
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Current Professional Standing</p>
+               </div>
+            </div>
+
+            <div className="flex flex-col md:flex-row items-center gap-6">
+               <div className="text-center md:text-right hidden sm:block">
+                  <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] mb-1">Status Report</p>
+                  <p className="text-xs font-black text-slate-600 uppercase italic">
+                    {profile?.tier === 'legend' ? "Highest Efficiency Attained" : 
+                     profile?.tier === 'missing' ? "Legend Tier: 70km Radius & Public Ratings" : "Pro Tier: 50km Radius & Invoicing"}
+                  </p>
+               </div>
+               {profile?.tier !== 'legend' && (
+                 <button 
+                  onClick={() => setShowTierModal(true)}
+                  className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest italic hover:scale-105 active:scale-95 shadow-xl transition-all flex items-center gap-3"
+                 >
+                    Upgrade to {profile?.tier === 'starter' ? 'Pro' : 'Legend'} <ArrowRight className="w-4 h-4" />
+                 </button>
+               )}
+            </div>
+         </div>
+      </section>
+
       {/* Operational Intelligence */}
       <section className="grid grid-cols-1 md:grid-cols-3 gap-8">
          <motion.div 
@@ -447,7 +496,7 @@ export default function TradesmanDashboard() {
                   <Bell className="w-6 h-6" />
                </div>
                <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-1">Incoming Comms</p>
+                  <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-1">Incoming Intel</p>
                   <h4 className="font-black text-slate-900 uppercase italic tracking-tighter text-xl">
                      {unreadCount} Unread Mission Transmission(s)
                   </h4>
@@ -462,7 +511,7 @@ export default function TradesmanDashboard() {
          {[
             { 
               id: 'comms', 
-              label: 'Mission Comms', 
+              label: 'Secure Chat', 
               icon: MessageSquare,
               count: unreadMessages
             },
@@ -508,7 +557,7 @@ export default function TradesmanDashboard() {
             >
                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 px-4 mt-4">
                   <div>
-                    <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">Mission <span className="text-primary tracking-normal">Comms Center</span></h3>
+                    <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">Secure <span className="text-primary tracking-normal">Chat Hub</span></h3>
                     <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic mt-1">Customers who reached out to you</p>
                   </div>
                   {/* Period Filter Tabs */}

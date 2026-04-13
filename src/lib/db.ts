@@ -130,6 +130,8 @@ export interface UserProfile {
   createdAt: any;
   status?: 'active' | 'suspended' | 'pending';
   phone?: string;
+  distance?: number;
+  mutedNotifications?: boolean;
 }
 
 // Helper to remove undefined values before Firestore write
@@ -203,58 +205,99 @@ export function getDistance(lat1: number, lon1: number, lat2: number, lon2: numb
   return R * c;
 }
 
-export const getProsByTrade = async (trade: string, userLat?: number, userLng?: number, searchRadiusKm: number = 70) => {
-  const cacheKey = `pros:${trade}:${userLat}:${userLng}:${searchRadiusKm}`;
+export function extractCoordinates(location: any): { lat: number; lng: number } | null {
+  if (!location) return null;
+  
+  // Handle Array format [lat, lng]
+  if (Array.isArray(location)) {
+    const lat = parseFloat(String(location[0]));
+    const lng = parseFloat(String(location[1]));
+    return (!isNaN(lat) && !isNaN(lng)) ? { lat, lng } : null;
+  }
+
+  // Handle Object formats
+  const rawLat = location.lat ?? location.latitude ?? location._lat;
+  const rawLng = location.lng ?? location.longitude ?? location.long ?? location._long;
+  
+  const lat = parseFloat(String(rawLat));
+  const lng = parseFloat(String(rawLng));
+  
+  if (!isNaN(lat) && !isNaN(lng)) {
+    return { lat, lng };
+  }
+
+  return null;
+}
+
+/**
+ * Universal trade matching logic.
+ * Checks for word-stem overlaps to handle legacy vs new data (e.g. "Plumbing" vs "Plumbers")
+ */
+function lenientTradeMatch(proTradeRaw: string | string[] | undefined, targetTradeRaw: string): boolean {
+  if (!proTradeRaw) return false;
+  const target = targetTradeRaw.toLowerCase();
+  if (target === 'general services') return true;
+
+  const proTrades = Array.isArray(proTradeRaw) 
+    ? proTradeRaw.map(t => t.toLowerCase()) 
+    : [proTradeRaw.toLowerCase()];
+
+  // Primary: Exact or partial inclusion
+  if (proTrades.some(t => t.includes(target) || target.includes(t))) return true;
+
+  // Secondary: Word Stem Overlap (e.g. "Plumb", "Electr", "Paint")
+  const stems = target.split(/[\s&,/]+/).filter(s => s.length > 3).map(s => s.substring(0, 5));
+  if (stems.length > 0) {
+    return proTrades.some(t => stems.some(stem => t.includes(stem)));
+  }
+
+  return false;
+}
+
+export const getProsByTrade = async (trade: string, userLat?: number, userLng?: number) => {
+  const cacheKey = `pros:${trade}:${userLat}:${userLng}:70`;
   const cached = getCached<UserProfile[]>(cacheKey);
   if (cached) return cached;
 
-  const usersRef = collection(db, 'users');
-  const q = query(usersRef, where('role', '==', 'tradesman'), where('trades', 'array-contains', trade));
-  let querySnapshot = await getDocs(q);
+  // Utilize the global tradesman cache to bypass Firestore indexing issues
+  // and ensure instant search availability.
+  const allPros = await getUsersByRole('tradesman');
   
-  // FALLBACK: If exact match returns nothing, fetch all tradesman and filter in memory
-  // This handles naming mismatches like "Plumbing" vs "Plumbers"
-  let docs = querySnapshot.docs;
-  if (docs.length === 0 && trade !== 'General Services') {
-    const allQ = query(usersRef, where('role', '==', 'tradesman'));
-    const allSnap = await getDocs(allQ);
-    docs = allSnap.docs.filter(doc => {
-      const data = doc.data();
-      const trades = (data.trades || []).map((t: string) => t.toLowerCase());
-      const target = trade.toLowerCase();
-      return trades.some((t: string) => t.includes(target) || target.includes(t.split(' ')[0]));
-    });
-  }
-
   const results: UserProfile[] = [];
-  const radius = Number(searchRadiusKm) || 70;
-  const effectiveRadius = Math.max(radius, 70);
+  const STRICT_RADIUS = 70;
 
-  docs.forEach((doc) => {
-    const data = doc.data() as UserProfile;
-    
+  allPros.forEach((data) => {
+    // Final Availability Verification
+    if (data.isAvailable === false) return;
+
+    // Check new 'trades' array OR legacy 'trade' string
+    const match = (trade === 'General Services') || 
+                  (data.trades && data.trades.includes(trade)) || 
+                  (data.trade && data.trade.includes(trade)) ||
+                  lenientTradeMatch(data.trades || data.trade, trade);
+
+    if (!match) return;
+
+    let distance = 999;
     if (userLat && userLng && data.location) {
-      // Robust coordinate parsing: handle strings and various object formats
-      const rawLat = data.location.lat ?? (Array.isArray(data.location) ? data.location[0] : null);
-      const rawLng = data.location.lng ?? (Array.isArray(data.location) ? data.location[1] : null);
-      
-      const proLat = typeof rawLat === 'string' ? parseFloat(rawLat) : (typeof rawLat === 'number' ? rawLat : null);
-      const proLng = typeof rawLng === 'string' ? parseFloat(rawLng) : (typeof rawLng === 'number' ? rawLng : null);
-
-      if (proLat !== null && !isNaN(proLat) && proLng !== null && !isNaN(proLng)) {
-        const distance = getDistance(userLat, userLng, proLat, proLng);
-        
-        if (distance <= effectiveRadius) {
-          results.push({ ...data, id: doc.id });
+      const coords = extractCoordinates(data.location);
+      if (coords) {
+        distance = getDistance(userLat, userLng, coords.lat, coords.lng);
+        if (distance <= STRICT_RADIUS) {
+          results.push({ ...data, distance });
         }
       }
     } else {
-      results.push({ ...data, id: doc.id });
+      // If no center search point, add them all for the universal view
+      results.push({ ...data, distance: 0 });
     }
   });
 
-  setCache(cacheKey, results, 60_000); // 1 min TTL
-  return results;
+  // Sort by proximity
+  const sorted = results.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+  
+  setCache(cacheKey, sorted, 60_000); // 1 min TTL
+  return sorted;
 };
 
 export const getUsersByRole = async (role: UserRole) => {
@@ -550,14 +593,15 @@ export const completeJobWithRating = async (jobId: string, rating: number, revie
     const proSnap = await getDoc(proRef);
     if (proSnap.exists()) {
       const proData = proSnap.data();
-      const currentRating = proData.rating || 5.0;
-      const currentCount = proData.reviewCount || 0;
+      const currentRating = typeof proData.rating === 'number' ? proData.rating : 5.0;
+      const currentCount = typeof proData.reviewCount === 'number' ? proData.reviewCount : 0;
       
       const newCount = currentCount + 1;
-      const newRating = ((currentRating * currentCount) + rating) / newCount;
+      const calculatedRating = ((currentRating * currentCount) + rating) / newCount;
+      const finalRating = isNaN(calculatedRating) ? rating : Math.round(calculatedRating * 10) / 10;
       
       await updateDoc(proRef, {
-        rating: Math.round(newRating * 10) / 10,
+        rating: finalRating,
         reviewCount: newCount
       });
       
@@ -602,17 +646,17 @@ export const createChatThread = async (jobId: string, customerId: string, trades
   const jobSnap = await getDoc(doc(db, 'jobs', jobId));
   const jobData = jobSnap.data();
 
-  // Fetch Participant Names for metadata
-  const customerSnap = await getDoc(doc(db, 'users', customerId));
-  const tradesmanSnap = await getDoc(doc(db, 'users', tradesmanId));
+  // Fetch Participant Names for metadata directly from the job to avoid permission errors
+  const customerName = jobData?.customerName || 'Customer';
+  const tradesmanName = jobData?.tradesmanName || 'Professional';
   
   await setDoc(chatRef, sanitizeData({
     id: chatId,
     jobId,
     customerId,
     tradesmanId,
-    customerName: customerSnap.data()?.fullName || 'Customer',
-    tradesmanName: tradesmanSnap.data()?.fullName || 'Professional',
+    customerName,
+    tradesmanName,
     participants: [customerId, tradesmanId],
     jobTitle: jobData?.title || 'Job Thread',
     lastMessage: '',
@@ -678,6 +722,28 @@ export const getEstimatesByJob = async (jobId: string) => {
   const q = query(estimatesRef, orderBy('createdAt', 'desc'));
   const snap = await getDocs(q);
   return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+};
+
+export const getRecentEstimatesByTradesman = async (tradesmanId: string) => {
+  // Query jobs for this tradesman that have estimates
+  const jobsRef = collection(db, 'jobs');
+  const q = query(
+    jobsRef, 
+    where('tradesmanId', '==', tradesmanId),
+    where('status', 'in', ['estimated', 'completed', 'active']),
+    orderBy('createdAt', 'desc'),
+    limit(10)
+  );
+  
+  const snap = await getDocs(q);
+  return snap.docs
+    .filter(doc => doc.data().estimateAmount && doc.data().lineItems)
+    .map(doc => ({
+      ...doc.data(),
+      id: doc.id,
+      docType: 'Estimate',
+      amount: doc.data().estimateAmount
+    }));
 };
 
 export const getChatThreads = async (userId: string, role: string) => {

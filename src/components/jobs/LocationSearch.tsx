@@ -9,9 +9,10 @@ interface LocationSearchProps {
   onLocationSelect: (address: string, lat: number, lng: number) => void;
   className?: string;
   placeholder?: string;
+  defaultValue?: string;
 }
 
-export default function LocationSearch({ onLocationSelect, className, placeholder = "Search location..." }: LocationSearchProps) {
+export default function LocationSearch({ onLocationSelect, className, placeholder = "Search location...", defaultValue }: LocationSearchProps) {
   return (
     <div className={cn("relative flex items-center group", className)}>
       <MapPin className="absolute z-10 left-6 w-5 h-5 text-muted-foreground group-focus-within:text-primary transition-colors" />
@@ -29,6 +30,7 @@ export default function LocationSearch({ onLocationSelect, className, placeholde
           fields: ['address_components', 'geometry', 'formatted_address'],
           types: ["address"],
         }}
+        defaultValue={defaultValue}
         placeholder={placeholder}
         className="w-full pl-14 pr-14 py-5 bg-white rounded-2xl border border-border shadow-sm focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none transition-all font-medium text-foreground placeholder:text-muted-foreground relative"
       />

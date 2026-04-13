@@ -275,7 +275,7 @@ export default function CustomerDashboard() {
                    activeTab === 'comms' ? "text-primary" : "text-muted-foreground hover:text-foreground"
                 )}
               >
-                Mission Comms
+                Secure Chat
                 {unreadMessages > 0 && (
                   <span className="bg-primary text-white text-[8px] w-4 h-4 flex items-center justify-center rounded-full animate-pulse">
                     {unreadMessages}

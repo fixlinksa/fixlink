@@ -13,14 +13,18 @@ import {
   Navigation,
   SearchIcon,
   User,
-  Shield
+  Shield,
+  Phone,
+  Mail,
+  MessageCircle,
+  ExternalLink
 } from 'lucide-react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
 import { useAuth } from '@/context/AuthContext';
 import { TRADES } from '@/lib/constants';
-import { createChatThread, getUsersByRole, getProsByTrade, getDistance } from '@/lib/db';
+import { createChatThread, getUsersByRole, getProsByTrade, getDistance, extractCoordinates } from '@/lib/db';
 
 // Helper to normalize search categories to exact database trade labels
 const normalizeTrade = (query: string): string => {
@@ -46,6 +50,47 @@ const normalizeTrade = (query: string): string => {
   return closest || query;
 };
 
+const ContactButtons = ({ pro, className = "" }: { pro: any, className?: string }) => {
+  const phone = pro.phone || pro.contactPhone;
+  const whatsappUrl = phone ? `https://wa.me/${phone.replace(/\D/g, '')}` : '#';
+  const telUrl = phone ? `tel:${phone}` : '#';
+  const mailUrl = pro.email ? `mailto:${pro.email}` : '#';
+
+  return (
+    <div className={`flex items-center gap-2 ${className}`}>
+      {phone && (
+        <>
+          <a 
+            href={whatsappUrl} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="w-10 h-10 rounded-full bg-green-500 text-white flex items-center justify-center hover:scale-110 transition-transform shadow-lg shadow-green-500/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <MessageCircle className="w-5 h-5" />
+          </a>
+          <a 
+            href={telUrl} 
+            className="w-10 h-10 rounded-full bg-primary text-white flex items-center justify-center hover:scale-110 transition-transform shadow-lg shadow-primary/20"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Phone className="w-5 h-5" />
+          </a>
+        </>
+      )}
+      {pro.email && (
+        <a 
+          href={mailUrl} 
+          className="w-10 h-10 rounded-full bg-slate-800 text-white flex items-center justify-center hover:scale-110 transition-transform shadow-lg shadow-black/20"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Mail className="w-5 h-5" />
+        </a>
+      )}
+    </div>
+  );
+};
+
 // Dynamically import Leaflet with no SSR and proper typing
 const MapContainer = dynamic(
   () => import('react-leaflet').then((mod) => mod.MapContainer),
@@ -59,6 +104,10 @@ const Marker = dynamic(
   () => import('react-leaflet').then((mod) => mod.Marker),
   { ssr: false }
 );
+const ZoomControl = dynamic(
+  () => import('react-leaflet').then((mod) => mod.ZoomControl),
+  { ssr: false }
+);
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false }
@@ -66,7 +115,7 @@ const Popup = dynamic(
 const Tooltip = dynamic(
   () => import('react-leaflet').then((mod) => mod.Tooltip),
   { ssr: false }
-);
+) as any;
 
 // Map initialization is handled within the component to prevent SSR errors
 
@@ -112,10 +161,10 @@ function SearchResultsContent() {
   
   const [activeTab, setActiveTab] = useState<'list' | 'map'>('map');
   const [selectedTrade, setSelectedTrade] = useState<string>(queryParam);
+  const [tradeSearch, setTradeSearch] = useState<string>('');
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
   const [pros, setPros] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  const [selectedPro, setSelectedPro] = useState<any | null>(null);
   const [mapIcons, setMapIcons] = useState<any>(null);
 
   // Initialize Leaflet icons safely on the client
@@ -157,63 +206,53 @@ function SearchResultsContent() {
     const fetchPros = async () => {
       setLoading(true);
       try {
+        // 1. Fetch professionals using the Optimized Discovery Engine
+        let allPros: any[] = [];
         const normalized = normalizeTrade(selectedTrade);
         
-        // Use specialized query if a trade is selected
-        let allPros: any[] = [];
         if (normalized !== 'General Services') {
-           allPros = await getProsByTrade(normalized, 
+           allPros = await getProsByTrade(
+             normalized, 
              latParam ? parseFloat(latParam) : undefined, 
              lngParam ? parseFloat(lngParam) : undefined
            );
-           
-           // BROAD DISCOVERY FALLBACK: If no results for specific trade, fetch all nearby pros
-           if (allPros.length === 0) {
-              const nearbyPros = await getUsersByRole('tradesman');
-              allPros = nearbyPros;
-           }
         } else {
-           allPros = await getUsersByRole('tradesman');
+           // If 'General Services', fetch all nearby with the same proximity rules
+           allPros = await getProsByTrade(
+             'General Services',
+             latParam ? parseFloat(latParam) : undefined, 
+             lngParam ? parseFloat(lngParam) : undefined
+           );
         }
         
         const baseLat = latParam ? parseFloat(latParam) : -33.9249;
         const baseLng = lngParam ? parseFloat(lngParam) : 18.4241;
 
-        // Map to UI format
-        const mappedPros = allPros
-          .map(p => {
-            // Robust parsing: handle strings and various object formats
-            const rawLat = p.location?.lat ?? (Array.isArray(p.location) ? p.location[0] : null);
-            const rawLng = p.location?.lng ?? (Array.isArray(p.location) ? p.location[1] : null);
-            
-            const proLat = typeof rawLat === 'string' ? parseFloat(rawLat) : (typeof rawLat === 'number' ? rawLat : null);
-            const proLng = typeof rawLng === 'string' ? parseFloat(rawLng) : (typeof rawLng === 'number' ? rawLng : null);
-            const hasLocation = proLat !== null && !isNaN(proLat) && proLng !== null && !isNaN(proLng);
-            
-            const dist = hasLocation ? getDistance(baseLat, baseLng, proLat, proLng) : 999;
-            
-            return {
-              id: p.id,
-              name: p.fullName || p.businessName || 'Pro',
-              trade: p.trade || (p.trades && p.trades[0]) || 'Generalist',
-              trades: p.trades || [p.trade].filter(Boolean),
-              rating: p.rating || 5.0,
-              reviews: p.reviewCount || 0,
-              description: p.businessName || 'Professional trade specialist registered on Fix Link.',
-              image: p.imageUrl || null,
-              featured: p.tier === 'legend',
-              location: hasLocation ? [proLat, proLng] : null,
-              verified: true,
-              tier: p.tier,
-              distance: dist,
-              isAvailable: p.isAvailable !== false
-            };
-          })
-          .filter(p => p.isAvailable && (p.distance <= 500 || !p.location)); // Only Available pros. Massive discovery radius for diagnostic visibility
+        // 2. Map Result to UI Schema (TRUSTING the 70km filter from db.ts)
+        const mappedPros = allPros.map(p => {
+          const coords = extractCoordinates(p.location);
+          const hasLocation = coords !== null;
+          
+          return {
+            id: p.id,
+            name: p.fullName || p.businessName || 'Pro',
+            trade: p.trade || (p.trades && p.trades[0]) || 'Generalist',
+            trades: p.trades || [p.trade].filter(Boolean),
+            rating: p.rating || 5.0,
+            reviews: p.reviewCount || 0,
+            description: p.businessName || 'Professional trade specialist registered on Fix Link.',
+            image: p.imageUrl || null,
+            featured: p.tier === 'legend',
+            location: hasLocation ? [coords.lat, coords.lng] : null,
+            verified: true,
+            tier: p.tier,
+            distance: p.distance ?? 999,
+            isAvailable: p.isAvailable !== false
+          };
+        });
 
-        // Filter and sort by distance
-        const finalResults = mappedPros.sort((a, b) => a.distance - b.distance);
-        setPros(finalResults);
+        // 3. Final Deployment synchronization
+        setPros(mappedPros);
       } catch (error) {
         console.error('Search fetch failed:', error);
       } finally {
@@ -223,15 +262,9 @@ function SearchResultsContent() {
     fetchPros();
   }, [selectedTrade, latParam, lngParam]); 
 
-  // Filter for both List and Map
-  const filteredPros = pros.filter(pro => 
-    selectedTrade === 'General Services' || 
-    (pro.trades && pro.trades.some((t: string) => t.toLowerCase() === selectedTrade.toLowerCase())) ||
-    (pro.trade && pro.trade.toLowerCase() === selectedTrade.toLowerCase())
-  );
-
   // Filter specifically for markers (must have location)
-  const mapMarkers = filteredPros.filter(pro => pro.location !== null);
+  // We trust 'pros' which is already filtered by normalized trade and 70km radius in fetchPros
+  const mapMarkers = pros.filter(pro => pro.location !== null);
 
   const handleContact = async (pro: any) => {
     if (!user) {
@@ -258,26 +291,39 @@ function SearchResultsContent() {
             <span className="w-8 h-[2px] bg-primary"></span>
             Search Results
           </div>
-          <h1 className="text-3xl md:text-5xl font-black tracking-tighter text-slate-900 mb-4 uppercase italic">
-            Found {filteredPros.length} <span className="text-primary">Professionals</span>
-          </h1>
+            <h1 className="text-4xl font-black text-slate-900 leading-tight italic tracking-tighter uppercase">
+              {pros.length} {pros.length === 1 ? 'Expert' : 'Experts'} <span className="text-primary tracking-normal">Found</span>
+            </h1>
+            <div className="flex flex-wrap items-center gap-2 mt-3">
+               <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest px-3 py-1 bg-slate-100 rounded-full">
+                 Fleet Sync: <span className="text-primary italic">Localized Discovery active</span>
+               </p>
+               <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest px-3 py-1 bg-slate-100 rounded-full">
+                 Radius: <span className="text-primary italic">Strict 70km</span>
+               </p>
+               <p className="text-slate-400 font-bold text-[8px] uppercase tracking-widest px-2 py-0.5 border border-slate-100 rounded-md">
+                 Ver: 1.0.4-Sync
+               </p>
+            </div>
           <p className="text-slate-400 font-bold text-sm uppercase mb-6 flex items-center gap-2">
              <MapPin className="w-4 h-4" /> Results near <span className="text-slate-900">{locationParam}</span>
           </p>
           
           <div className="relative inline-block w-full max-w-sm">
-            <button 
-              onClick={() => setIsCategoryOpen(!isCategoryOpen)}
-              className="flex items-center justify-between w-full px-6 py-4 bg-white border border-slate-200 rounded-2xl text-slate-900 font-bold hover:border-primary transition-all"
-            >
-              <div className="flex items-center gap-3">
-                <Search className="w-4 h-4 text-primary" />
-                <span className="truncate">{selectedTrade}</span>
-              </div>
-              <motion.div animate={{ rotate: isCategoryOpen ? 180 : 0 }}>
-                <Navigation className="w-4 h-4 text-slate-400 rotate-90" />
-              </motion.div>
-            </button>
+            <div className="relative group">
+              <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-primary group-focus-within:scale-110 transition-transform" />
+              <input 
+                type="text"
+                placeholder="Type and select trade..."
+                value={isCategoryOpen ? tradeSearch : selectedTrade}
+                onFocus={() => {
+                  setTradeSearch('');
+                  setIsCategoryOpen(true);
+                }}
+                onChange={(e) => setTradeSearch(e.target.value)}
+                className="w-full bg-white border border-slate-200 p-6 rounded-2xl pl-14 text-sm font-bold outline-none focus:border-primary transition-all shadow-sm"
+              />
+            </div>
 
             <AnimatePresence>
               {isCategoryOpen && (
@@ -291,17 +337,19 @@ function SearchResultsContent() {
                     <button
                       onClick={() => {
                         setSelectedTrade('General Services');
+                        setTradeSearch('');
                         setIsCategoryOpen(false);
                       }}
                       className="px-4 py-3 rounded-xl text-left text-xs font-black uppercase tracking-widest hover:bg-slate-50 hover:text-primary transition-all"
                     >
                       All Services
                     </button>
-                    {TRADES.map((trade) => (
+                    {TRADES.filter(t => t.toLowerCase().includes(tradeSearch.toLowerCase())).map((trade) => (
                       <button
                         key={trade}
                         onClick={() => {
                           setSelectedTrade(trade);
+                          setTradeSearch(trade);
                           setIsCategoryOpen(false);
                         }}
                         className={`px-4 py-3 rounded-xl text-left text-xs font-black uppercase tracking-widest transition-all ${selectedTrade === trade ? 'bg-primary/5 text-primary' : 'hover:bg-slate-50 text-slate-600 hover:text-primary'}`}
@@ -309,6 +357,9 @@ function SearchResultsContent() {
                         {trade}
                       </button>
                     ))}
+                    {TRADES.filter(t => t.toLowerCase().includes(tradeSearch.toLowerCase())).length === 0 && (
+                      <p className="p-4 text-center text-[10px] font-black uppercase tracking-widest text-slate-400 italic">No matching trades</p>
+                    )}
                   </div>
                 </motion.div>
               )}
@@ -335,7 +386,7 @@ function SearchResultsContent() {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
         {/* Results Sidebar / Content - 7 columns */}
         <div className={`lg:col-span-7 space-y-6 ${activeTab === 'map' ? 'hidden' : 'block'}`}>
-          {filteredPros.map((pro, index) => (
+          {pros.map((pro, index) => (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
               animate={{ opacity: 1, y: 0 }}
@@ -384,37 +435,52 @@ function SearchResultsContent() {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-4 pt-4 border-t border-slate-50">
-                    <button 
-                      onClick={() => handleContact(pro)}
-                      className="flex-1 py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
-                    >
-                      Hire Specialist
-                    </button>
-                    <button 
-                      onClick={() => handleContact(pro)}
-                      className="w-14 h-14 border-2 border-slate-100 text-slate-400 rounded-2xl flex items-center justify-center hover:border-primary hover:text-primary transition-all"
-                    >
-                      <MessageSquare className="w-6 h-6" />
-                    </button>
-                  </div>
+                  <div className="flex items-center justify-between mt-4 gap-4">
+                      <div className="flex-1">
+                        <button 
+                          onClick={() => handleContact(pro)}
+                          className="w-full py-4 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-2"
+                        >
+                          Message & Hire
+                        </button>
+                      </div>
+                      <ContactButtons pro={pro} />
+                    </div>
                 </div>
               </div>
             </motion.div>
           ))}
 
-          {filteredPros.length === 0 && (
-             <div className="flex flex-col items-center justify-center py-32 text-center">
-                <div className="w-24 h-24 bg-muted rounded-full flex items-center justify-center mb-8">
-                   <SearchIcon className="w-12 h-12 text-muted-foreground opacity-20" />
+          {pros.length === 0 && (
+             <div className="flex flex-col items-center justify-center py-24 px-6 text-center bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200">
+                <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mb-8 shadow-xl">
+                   <Navigation className="w-10 h-10 text-primary animate-pulse" />
                 </div>
-                <h2 className="text-3xl font-black tracking-tight mb-4 lowercase">No pros found nearby.</h2>
-                <p className="text-muted-foreground max-w-md font-medium mb-12">
-                   Try expanding your search or selecting a different category. We're growing fast!
-                </p>
-                <Link href="/" className="px-10 py-5 bg-primary text-white rounded-3xl font-black shadow-xl shadow-primary/20">
-                   Go Back Home
-                </Link>
+                <h2 className="text-3xl font-black tracking-tight mb-4 italic uppercase">No Experts in Range</h2>
+                <div className="max-w-md space-y-4 mb-10">
+                   <p className="text-slate-500 font-bold leading-relaxed">
+                      We strictly scan within a <span className="text-primary italic">70km radius</span> of 
+                      <span className="text-slate-900 ml-1 italic">{locationParam.split(',')[0]}</span>.
+                   </p>
+                   <p className="text-slate-400 text-sm">
+                      There are currently no <span className="text-slate-900">{selectedTrade}</span> specialists 
+                      visible in this exact zone.
+                   </p>
+                </div>
+                <div className="flex flex-wrap justify-center gap-4">
+                  <button 
+                    onClick={() => {
+                      setTradeSearch('General Services');
+                      setIsCategoryOpen(true);
+                    }}
+                    className="px-8 py-5 bg-primary text-white rounded-3xl font-black shadow-xl shadow-primary/20 hover:scale-[1.05] transition-all uppercase text-xs tracking-widest"
+                  >
+                    Try Broad Category
+                  </button>
+                  <Link href="/" className="px-8 py-5 bg-white border-2 border-slate-200 text-slate-900 rounded-3xl font-black shadow-lg hover:bg-slate-50 transition-all uppercase text-xs tracking-widest">
+                    Change Location
+                  </Link>
+                </div>
              </div>
           )}
         </div>
@@ -424,12 +490,20 @@ function SearchResultsContent() {
           <div className="w-full h-full bg-slate-100 rounded-[3rem] border border-slate-200 overflow-hidden shadow-2xl relative transition-all duration-500">
             <div className="absolute inset-0 z-0 bg-[#e5e7eb]">
                 <MapContainer 
+                  key={`${latParam}-${lngParam}-${selectedTrade}`}
                   center={centerPosition} 
                   zoom={zoomLevel} 
                   style={{ height: '100%', width: '100%' }}
-                  {...({ scrollWheelZoom: false } as any)}
+                  zoomControl={false}
+                  {...({ 
+                    scrollWheelZoom: true,
+                    touchZoom: true,
+                    dragging: true,
+                    doubleClickZoom: true
+                  } as any)}
                 >
                   <MapEffect activeTab={activeTab} markers={mapMarkers} />
+                  <ZoomControl position="bottomright" />
                   <TileLayer
                     attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
                     url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
@@ -454,11 +528,12 @@ function SearchResultsContent() {
                     <Marker 
                       key={pro.id} 
                       position={pro.location as any}
-                      eventHandlers={{
-                        click: () => setSelectedPro(pro),
-                      }}
                     >
-                      <Tooltip permanent direction="top" className="custom-map-tooltip">
+                      <Tooltip 
+                        permanent={true} 
+                        direction="top" 
+                        className="custom-map-tooltip"
+                      >
                         <div className="flex flex-col items-center">
                           <span className="text-[9px] font-black uppercase tracking-tighter text-slate-900 bg-white px-2 py-0.5 rounded shadow-sm">
                             {pro.name}
@@ -523,72 +598,6 @@ function SearchResultsContent() {
                 </MapContainer>
             </div>
 
-            {/* Selected Pro Details Card */}
-            <AnimatePresence>
-              {selectedPro && (
-                <motion.div 
-                  initial={{ opacity: 0, y: 100 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 100 }}
-                  className="absolute bottom-10 left-10 right-10 z-[1000]"
-                >
-                  <div className="bg-white rounded-[2.5rem] p-6 shadow-2xl border border-slate-100 flex items-center gap-6 relative max-w-2xl mx-auto overflow-hidden">
-                    <button 
-                      onClick={() => setSelectedPro(null)}
-                      className="absolute top-4 right-6 text-slate-300 hover:text-slate-600 font-bold text-xl transition-colors"
-                    >
-                      &times;
-                    </button>
-
-                    <div className="w-24 h-24 rounded-3xl overflow-hidden bg-slate-100 shrink-0 shadow-lg flex items-center justify-center">
-                       {selectedPro.image ? (
-                         <img 
-                          src={selectedPro.image} 
-                          alt={selectedPro.name} 
-                          className="w-full h-full object-cover"
-                         />
-                       ) : (
-                         <User className="w-10 h-10 text-slate-300" />
-                       )}
-                    </div>
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h3 className="text-xl font-black text-slate-900 uppercase italic tracking-tight truncate">
-                          {selectedPro.name}
-                        </h3>
-                        <ShieldCheck className="w-5 h-5 text-primary" />
-                      </div>
-                      
-                      <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-4 italic opacity-70">
-                         {selectedPro.trade}
-                      </p>
-                      
-                      <div className="flex items-center gap-4 text-xs font-bold text-slate-500">
-                        <div className="flex items-center gap-1">
-                           <Star className="w-3.5 h-3.5 text-accent fill-accent" />
-                           <span className="text-slate-900">{selectedPro.rating.toFixed(1)}</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                           <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                           <span>{selectedPro.distance.toFixed(1)}km</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-col gap-2">
-                      <button 
-                        onClick={() => handleContact(selectedPro)}
-                        className="px-8 py-4 bg-primary text-white rounded-2xl font-black text-[10px] uppercase tracking-widest shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all whitespace-nowrap"
-                      >
-                         Message & Hire
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
-            </AnimatePresence>
-
             {/* Overlays */}
             <div className="absolute top-6 left-6 right-6 z-10 pointer-events-none flex flex-col gap-3">
               <div className="bg-white/90 backdrop-blur-md rounded-2xl p-3 shadow-2xl shadow-black/10 border border-white/50 w-fit">
@@ -619,7 +628,7 @@ function SearchResultsContent() {
                      </div>
                   </div>
                   <p className="text-white font-bold text-xs leading-relaxed opacity-80 mb-4">
-                    Analyzing <span className="text-primary italic">500km radius</span>...
+                    Analyzing <span className="text-primary italic">70km radius</span>...
                   </p>
                   <button className="w-full py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/40 hover:scale-[1.02] active:scale-95 transition-all">
                     Refine Search Area

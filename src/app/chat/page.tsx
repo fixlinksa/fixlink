@@ -16,7 +16,9 @@ import {
   ExternalLink,
   Download,
   Upload,
-  X
+  X,
+  Navigation,
+  MapPin
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '@/context/AuthContext';
@@ -35,12 +37,14 @@ import {
 } from 'firebase/firestore';
 import { sendMessage, getChatThreads, getEstimatesByJob, getInvoicesByJob, getJob, getUserProfile, deleteChat, deleteMessage } from '@/lib/db';
 import { storage } from '@/lib/firebase';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage';
 import { PdfDocument } from '@/components/PdfDocument';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
+import { getRecentEstimatesByTradesman } from '@/lib/db';
+import { smartCompressImage } from '@/lib/image-utils';
 
 function ChatContent() {
   const { user, profile } = useAuth();
@@ -60,6 +64,19 @@ function ChatContent() {
   const router = useRouter();
   const chatIdParam = searchParams.get('chatId');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [lastMsgId, setLastMsgId] = useState<string | null>(null);
+
+  // Audio helper for notifications
+  const playAlert = () => {
+    if (profile?.mutedNotifications) return;
+    try {
+      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      audio.volume = 0.5;
+      audio.play().catch(e => console.log('Audio playback requires user interaction first.'));
+    } catch (e) {
+      console.error('Audio engine failure:', e);
+    }
+  };
 
   // Scroll to bottom
   const scrollToBottom = () => {
@@ -113,12 +130,28 @@ function ChatContent() {
 
   // Handle chatId from URL
   useEffect(() => {
-    if (chatIdParam && chats.length > 0 && !selectedChat) {
+    const handleUrlChatSelection = async () => {
+      if (!chatIdParam || chats.length === 0 || selectedChat) return;
+      
       const chat = chats.find(c => c.id === chatIdParam);
       if (chat) {
         setSelectedChat(chat);
+      } else {
+        // Direct fetch backup if listener hasn't caught it yet
+        try {
+          const chatRef = doc(db, 'chats', chatIdParam);
+          const chatSnap = await getDoc(chatRef);
+          if (chatSnap.exists()) {
+            const directChat = { ...chatSnap.data(), id: chatSnap.id };
+            setSelectedChat(directChat);
+          }
+        } catch (err) {
+          console.error("Direct chat selection failure:", err);
+        }
       }
-    }
+    };
+
+    handleUrlChatSelection();
   }, [chatIdParam, chats, selectedChat]);
 
   // Load Messages for Selected Chat
@@ -132,7 +165,17 @@ function ChatContent() {
       const msgList = snapshot.docs.map(doc => ({
         ...doc.data(),
         id: doc.id
-      }));
+      })) as any[];
+      
+      // Play sound for new incoming messages
+      if (msgList.length > 0 && user) {
+        const latestMsg = msgList[msgList.length - 1];
+        if (latestMsg.id !== lastMsgId && latestMsg.senderId !== user.uid) {
+           playAlert();
+           setLastMsgId(latestMsg.id);
+        }
+      }
+
       setMessages(msgList);
     }, (error) => {
       console.error("Messages listener failure:", error);
@@ -161,10 +204,18 @@ function ChatContent() {
     setIsAttachOpen(true);
     setLoadingDocs(true);
     try {
-      const [estimates, invoices] = await Promise.all([
-        getEstimatesByJob(selectedChat.jobId),
-        getInvoicesByJob(selectedChat.jobId)
-      ]);
+      let estimates: any[] = [];
+      let invoices: any[] = [];
+
+      if (selectedChat.jobId && !selectedChat.jobId.startsWith('inquiry_')) {
+        [estimates, invoices] = await Promise.all([
+          getEstimatesByJob(selectedChat.jobId),
+          getInvoicesByJob(selectedChat.jobId)
+        ]);
+      } else {
+        // Inquiry or global - fetch recent estimates for this tradesman
+        estimates = await getRecentEstimatesByTradesman(user!.uid);
+      }
       
       const combined = [
         ...estimates.map(e => ({ ...e, docType: 'Estimate' })),
@@ -273,8 +324,23 @@ function ChatContent() {
 
     setSubmitting(true);
     try {
+      let finalFile: any = file;
+      let finalFormat: 'blob' | 'data_url' = 'blob';
+
+      if (file.type.startsWith('image/')) {
+        finalFile = await smartCompressImage(file);
+        finalFormat = 'data_url';
+      }
+
       const storageRef = ref(storage, `chats/${selectedChat.id}/${Date.now()}_${file.name}`);
-      const snapshot = await uploadBytes(storageRef, file);
+      let snapshot;
+      
+      if (finalFormat === 'data_url') {
+        snapshot = await uploadString(storageRef, finalFile, 'data_url');
+      } else {
+        snapshot = await uploadBytes(storageRef, finalFile);
+      }
+      
       const downloadURL = await getDownloadURL(snapshot.ref);
 
       const isImage = file.type.startsWith('image/');
@@ -325,7 +391,7 @@ function ChatContent() {
           </button>
           <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-[10px] mb-4 italic">
             <span className="w-8 h-[2px] bg-primary"></span>
-            Mission Comms
+            Secure Chat
           </div>
           <h1 className="text-3xl font-black mb-8 tracking-tighter italic uppercase text-slate-900 leading-none">Messages</h1>
           <div className="relative">
@@ -409,18 +475,40 @@ function ChatContent() {
                   </h2>
                   <p className="text-[8px] md:text-[10px] font-bold text-slate-400 truncate uppercase tracking-tight italic opacity-60">Mission: {selectedChat.jobTitle}</p>
                 </div>
-              </div>
-              <div className="flex items-center gap-1 md:gap-3">
-                 <button 
-                   onClick={handleTerminateSession}
-                   className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-white border border-red-50 text-red-400 hover:bg-red-50 hover:text-red-500 transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic"
-                 >
-                    <Trash2 className="w-4 h-4" />
-                    <span className="hidden lg:inline">Terminate Session</span>
-                 </button>
-                 <button className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 text-slate-400 hover:text-slate-900 transition-all">
-                   <MoreVertical className="w-5 h-5" />
-                 </button>
+                <div className="flex items-center gap-1 md:gap-3">
+                  {profile?.role === 'tradesman' && (
+                    <button 
+                      onClick={async () => {
+                        const jobData = await getJob(selectedChat.jobId);
+                        const location = jobData?.locationData || jobData?.location;
+                        if (location) {
+                          const lat = (location as any).lat;
+                          const lng = (location as any).lng;
+                          const url = lat && lng 
+                            ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
+                            : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(typeof location === 'string' ? location : (location as any).address || '')}`;
+                          window.open(url, '_blank');
+                        } else {
+                          alert("No location data available for this mission.");
+                        }
+                      }}
+                      className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-white border border-slate-100 text-primary hover:bg-primary/5 transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic"
+                    >
+                       <MapPin className="w-4 h-4" />
+                       <span className="hidden lg:inline">Navigate To Site</span>
+                    </button>
+                  )}
+                  <button 
+                    onClick={handleTerminateSession}
+                    className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-white border border-red-50 text-red-400 hover:bg-red-50 hover:text-red-500 transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic"
+                  >
+                     <Trash2 className="w-4 h-4" />
+                     <span className="hidden lg:inline">Terminate Session</span>
+                  </button>
+                  <button className="p-3 md:p-4 rounded-xl md:rounded-2xl bg-slate-50 border border-slate-100 text-slate-400 hover:text-slate-900 transition-all">
+                    <MoreVertical className="w-5 h-5" />
+                  </button>
+               </div>
               </div>
             </header>
 

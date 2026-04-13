@@ -4,15 +4,12 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: process.env.GMAIL_USER || 'fixlinksa@gmail.com',
-    pass: process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq',
+    pass: process.env.GMAIL_APP_PASSWORD, 
   },
 });
-
 export async function sendWelcomeEmail(to: string, name: string) {
-  const hasPassword = !!(process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq');
-  
-  if (!hasPassword) {
-    console.warn('Email skipped: GMAIL_APP_PASSWORD not configured.');
+  if (!process.env.GMAIL_APP_PASSWORD || !process.env.GMAIL_USER) {
+    console.warn('EMAIL FAILURE: Missing GMAIL_APP_PASSWORD or GMAIL_USER environment variables.');
     return { success: false, error: 'Email service misconfigured' };
   }
   const mailOptions = {
@@ -54,7 +51,7 @@ export async function sendDocumentEmail(to: string, proName: string, type: strin
   const mailOptions = {
     from: `"Fix Link | ${proName}" <fixlinksa@gmail.com>`,
     to,
-    subject: `${type} from ${proName} | Fix Link Comms`,
+    subject: `${type} from ${proName} | Fix Link Secure Chat`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #eee; border-radius: 20px;">
         <h2 style="color: #1E4E79; text-transform: uppercase;">Message from ${proName}</h2>

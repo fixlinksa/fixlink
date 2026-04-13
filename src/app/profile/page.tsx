@@ -13,11 +13,13 @@ import {
   MapPin, 
   Briefcase,
   Loader2,
-  Plus
+  Plus,
+  TrendingUp
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter } from 'next/navigation';
 import LocationSearch from '@/components/jobs/LocationSearch';
+import { smartCompressImage } from '@/lib/image-utils';
 
 export default function ProfilePage() {
   const { user, profile, loading, signOut } = useAuth();
@@ -34,6 +36,7 @@ export default function ProfilePage() {
     estimateExpiryDays: 30,
     address: '',
     location: { lat: 0, lng: 0 } as any,
+    mutedNotifications: false,
   });
   const [updateLoading, setUpdateLoading] = React.useState(false);
   const [imageError, setImageError] = React.useState<string | null>(null);
@@ -50,6 +53,7 @@ export default function ProfilePage() {
         estimateExpiryDays: profile.estimateExpiryDays || 30,
         address: profile.address || '',
         location: profile.location || { lat: -33.9249, lng: 18.4241 },
+        mutedNotifications: profile.mutedNotifications || false,
       });
     }
   }, [profile]);
@@ -172,20 +176,17 @@ export default function ProfilePage() {
                       className="hidden" 
                       accept="image/*"
                       capture="environment"
-                      onChange={(e) => {
+                      onChange={async (e) => {
                         const file = e.target.files?.[0];
                         if (file) {
-                          // Check for 800KB limit (819,200 bytes)
-                          if (file.size > 800 * 1024) {
-                            setImageError("Profile photo is too heavy! Please reduce size below 800KB for mission synchronization.");
-                            return;
+                          try {
+                            setImageError(null);
+                            const compressedDataUrl = await smartCompressImage(file);
+                            setFormData({ ...formData, imageUrl: compressedDataUrl });
+                          } catch (err) {
+                            setImageError("Profile compression failure: Photo too heavy or invalid format.");
+                            console.error("Compression failure:", err);
                           }
-                          setImageError(null);
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setFormData({ ...formData, imageUrl: reader.result as string });
-                          };
-                          reader.readAsDataURL(file);
                         }
                       }}
                     />
@@ -242,20 +243,17 @@ export default function ProfilePage() {
                         type="file" 
                         className="hidden" 
                         accept="image/*"
-                        onChange={(e) => {
+                        onChange={async (e) => {
                           const file = e.target.files?.[0];
                           if (file) {
-                            // Check for 800KB limit
-                            if (file.size > 800 * 1024) {
-                              setImageError("Company logo is too heavy! Please reduce size below 800KB for mission synchronization.");
-                              return;
+                            try {
+                              setImageError(null);
+                              const compressedDataUrl = await smartCompressImage(file);
+                              setFormData({ ...formData, companyLogoUrl: compressedDataUrl });
+                            } catch (err) {
+                              setImageError("Logo compression failure: File too large or invalid format.");
+                              console.error("Logo compression failure:", err);
                             }
-                            setImageError(null);
-                            const reader = new FileReader();
-                            reader.onloadend = () => {
-                              setFormData({ ...formData, companyLogoUrl: reader.result as string });
-                            };
-                            reader.readAsDataURL(file);
                           }
                         }}
                       />
@@ -354,6 +352,25 @@ export default function ProfilePage() {
               >
                  {updateLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Shield className="w-5 h-5" />}
                  {updateLoading ? "Synchronizing..." : "Update Identity Variables"}
+              </button>
+           </div>
+        </section>
+
+        {/* Protocol Controls - Notifications */}
+        <section className="bg-white border border-slate-100 rounded-[3rem] p-8 md:p-12 shadow-sm">
+           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+              <div>
+                 <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900 mb-1 italic">Mission Alert Protocol</h4>
+                 <p className="text-xs font-bold text-slate-400">Toggle auditory signals for incoming intelligence and messages.</p>
+              </div>
+              <button 
+                 onClick={() => setFormData({ ...formData, mutedNotifications: !formData.mutedNotifications })}
+                 className={`shrink-0 px-8 py-4 rounded-2xl font-black uppercase tracking-widest text-[10px] transition-all flex items-center gap-3 ${
+                    formData.mutedNotifications ? 'bg-slate-300 text-slate-600' : 'bg-primary text-white shadow-lg shadow-primary/20'
+                 }`}
+              >
+                 {formData.mutedNotifications ? <Settings className="w-4 h-4 shadow-none" /> : <TrendingUp className="w-4 h-4 rotate-90" />}
+                 {formData.mutedNotifications ? 'Alerts Muted' : 'Alerts Active'}
               </button>
            </div>
         </section>
