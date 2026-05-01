@@ -21,12 +21,12 @@ import {
 } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { getJob, getInventory, updateJob, createJob, createInvoice, updateStock, getUserProfile, getRecentCustomers, InventoryItem, UserProfile, Job } from '@/lib/db';
+import { getJob, getInventory, updateJob, createJob, createInvoice, updateStock, getUserProfile, getRecentCustomers, getEstimate, getProCustomerIds, createNotification, markInvoiceAsPaid, markDepositAsPaid, getInvoicesByJob, InventoryItem, UserProfile, Job } from '@/lib/db';
 import { TIER_CONFIG, UNIT_TYPES } from '@/lib/constants';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import { PdfDocument } from '@/components/PdfDocument';
 import { QuickAddStockModal } from '@/components/tradesman/QuickAddStockModal';
+import { renderPdfCanvas } from '@/lib/pdfSanitizer';
 import LocationSearch from '@/components/jobs/LocationSearch';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -46,6 +46,7 @@ function InvoiceContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const id = searchParams.get('id') || 'direct';
+  const estimateId = searchParams.get('estimateId');
   const { user, profile, loading: authLoading } = useAuth();
   const [job, setJob] = useState<Job | null>(null);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -57,6 +58,14 @@ function InvoiceContent() {
   const [recentCustomers, setRecentCustomers] = useState<{ uid: string, name: string }[]>([]);
   const [isCustomerSelectOpen, setIsCustomerSelectOpen] = useState(false);
   const [isQuickAddOpen, setIsQuickAddOpen] = useState(false);
+  const [customerIds, setCustomerIds] = useState<string[]>([]);
+  const [depositAmount, setDepositAmount] = useState<number>(0);
+  const [depositType, setDepositType] = useState<'percentage' | 'fixed'>('percentage');
+  const [activeInvoiceId, setActiveInvoiceId] = useState<string | null>(null);
+  const [isPaid, setIsPaid] = useState(false);
+  const [isDepositPaid, setIsDepositPaid] = useState(false);
+  const [proProfile, setProProfile] = useState<UserProfile | null>(null);
+  const isCustomer = profile?.role === 'customer';
 
   useEffect(() => {
     if (user) {
@@ -81,26 +90,72 @@ function InvoiceContent() {
           createdAt: new Date()
         } as Job);
         setInventory(invData);
-        setLineItems([]);
+        // Mock items for direct/standalone invoice demo
+        const mockItems: InvoiceLineItem[] = [
+          { id: 'm1', name: 'Service Labor', unitType: 'hour', quantity: 1, sellingIncl: 450, costExcl: 0 },
+          { id: 'm2', name: 'Materials & Parts', unitType: 'unit', quantity: 1, sellingIncl: 300, costExcl: 150 }
+        ];
+        setLineItems(mockItems);
+        if (profile?.role === 'tradesman') setProProfile(profile);
       } else {
         const [jobData, invData] = await Promise.all([
           getJob(id),
           getInventory(user!.uid)
         ]);
         
-        // IMPORTANT: Wait for authLoading to be false before evaluating unauthorized access
-        if (!authLoading && jobData && jobData.tradesmanId && jobData.tradesmanId !== user!.uid) {
-           console.warn('DEBUG [Invoice Guard]: Access denied.', { 
-             jobId: id, 
-             jobTradesmanId: jobData.tradesmanId, 
-             currentUserUid: user!.uid 
-           });
-           router.push('/dashboard/tradesman?error=unauthorized');
-           return;
+        // Load invoice data if already billed or completed
+        if (jobData && (jobData.status === 'billed' || jobData.status === 'completed')) {
+           const invoices = await getInvoicesByJob(id);
+           if (invoices.length > 0) {
+              const inv = invoices[0] as any;
+              setActiveInvoiceId(inv.id);
+              setIsPaid(inv.status === 'paid' || inv.isPaid === true);
+              setLineItems(inv.lineItems || []);
+              setNotes(inv.notes || '');
+              setDepositAmount(jobData.depositAmount || 0);
+              setDepositType(jobData.depositType || 'percentage');
+              setIsDepositPaid(jobData.depositPaid || false);
+           }
+        } else if (jobData && jobData.lineItems) {
+           // Use job line items as base if not billed yet but has items (e.g. from estimate)
+           setLineItems(jobData.lineItems);
+           setDepositAmount(jobData.depositAmount || 0);
+           setDepositType(jobData.depositType || 'percentage');
+           setIsDepositPaid(jobData.depositPaid || false);
+           setNotes(jobData.notes || '');
         }
 
-        setJob(jobData);
-        setInventory(invData);
+        // IMPORTANT: Wait for authLoading to be false before evaluating unauthorized access
+        const userRole = (profile?.role || '').toLowerCase();
+        const isProRole = userRole === 'tradesman' || userRole === 'professional' || userRole === 'pro';
+        const isCustomer = profile?.role === 'customer';
+        const isAdmin = userRole === 'admin';
+
+        if (!authLoading && jobData && jobData.tradesmanId && jobData.tradesmanId !== user!.uid && !isCustomer && !isAdmin) {
+            console.warn('DEBUG [Invoice Guard]: Access denied.', { 
+              jobId: id, 
+              jobTradesmanId: jobData.tradesmanId, 
+              currentUserUid: user!.uid,
+              userRole: profile?.role
+            });
+            router.push(`/dashboard?error=unauthorized&status=${jobData.status}&role=${profile?.role}`);
+            return;
+        }
+
+         setJob(jobData);
+         setInventory(invData);
+
+         // Load professional profile for the header
+         if (jobData?.tradesmanId) {
+            try {
+               const proData = await getUserProfile(jobData.tradesmanId);
+               setProProfile(proData);
+            } catch (err) {
+               console.warn("Failed to load pro profile for invoice header:", err);
+            }
+         } else if (profile?.role === 'tradesman') {
+            setProProfile(profile);
+         }
         
         // Auto-populate customer info from their profile if fields are empty
         if (jobData && jobData.customerId) {
@@ -112,7 +167,7 @@ function InvoiceContent() {
                      return {
                         ...prev,
                         customerName: prev.customerName || customerProfile.fullName || '',
-                        customerPhone: prev.customerPhone || customerProfile.phone || '',
+                        customerPhone: prev.customerPhone || customerProfile.contactPhone || customerProfile.phone || '',
                         customerEmail: prev.customerEmail || customerProfile.email || '',
                         customerAddress: prev.customerAddress || customerProfile.address || (typeof customerProfile.location === 'object' ? customerProfile.location?.address : customerProfile.location) || '',
                         location: prev.location || customerProfile.address || customerProfile.location || ''
@@ -124,11 +179,27 @@ function InvoiceContent() {
            }
         }
 
-        if (jobData?.lineItems) {
-          setLineItems(jobData.lineItems);
-        }
-        if (jobData?.notes) {
-          setNotes(jobData.notes);
+        if (estimateId) {
+          const estData = await getEstimate(id, estimateId);
+          if (estData) {
+            if (estData.lineItems) setLineItems(estData.lineItems);
+            if (estData.notes) setNotes(estData.notes);
+            if (estData.depositAmount !== undefined) setDepositAmount(estData.depositAmount);
+            if (estData.depositType) setDepositType(estData.depositType);
+            if (estData.depositPaid !== undefined) setIsDepositPaid(estData.depositPaid);
+            
+            // Auto-populate customer info from estimate if available
+            if (estData.customerId && !jobData?.customerId) {
+              setJob(prev => prev ? { ...prev, customerId: estData.customerId } : null);
+            }
+          }
+        } else {
+          if (jobData?.lineItems) {
+            setLineItems(jobData.lineItems);
+          }
+          if (jobData?.notes) {
+            setNotes(jobData.notes);
+          }
         }
       }
     } catch (error) {
@@ -140,10 +211,14 @@ function InvoiceContent() {
 
     // Load recent customers for quick select
     try {
-       const recent = await getRecentCustomers(user!.uid);
+       const [recent, ids] = await Promise.all([
+         getRecentCustomers(user!.uid),
+         getProCustomerIds(user!.uid)
+       ]);
        setRecentCustomers(recent);
+       setCustomerIds(ids);
     } catch (err) {
-       console.warn("Failed to load recent customers:", err);
+       console.warn("Failed to load customer data:", err);
     }
   };
 
@@ -156,7 +231,7 @@ function InvoiceContent() {
              ...job,
              customerId: uid,
              customerName: customerProfile.fullName || '',
-             customerPhone: customerProfile.phone || '',
+             customerPhone: customerProfile.contactPhone || customerProfile.phone || '',
              customerEmail: customerProfile.email || '',
              customerAddress: customerProfile.address || (typeof customerProfile.location === 'object' ? customerProfile.location?.address : customerProfile.location) || '',
              location: customerProfile.address || customerProfile.location || '',
@@ -173,7 +248,7 @@ function InvoiceContent() {
   };
 
   // Tier Check
-  if (profile && profile.tier === 'starter') {
+  if (profile && profile.role === 'tradesman' && profile.tier === 'starter') {
     return (
       <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
         <div className="max-w-md w-full bg-white rounded-[3rem] p-12 text-center shadow-xl border border-slate-100">
@@ -182,13 +257,46 @@ function InvoiceContent() {
            </div>
            <h2 className="text-3xl font-black uppercase tracking-tight italic mb-4">Upgrade <span className="text-primary">Required</span></h2>
            <p className="text-slate-500 font-medium leading-relaxed mb-10 italic">
-              Link Starter accounts are limited to discovery only. Upgrade to **Missing Link** or **Link Legend** to unlock mission-critical invoicing and estimates.
+              The Fix Link accounts are limited to discovery only. Upgrade to **The Link Plus** or **The Link Legend** to unlock job-critical invoicing and estimates.
            </p>
            <button 
              onClick={() => router.push('/dashboard/tradesman/profile')}
              className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-widest text-xs hover:scale-105 transition-all shadow-xl shadow-black/10"
            >
              Elevate My Status
+           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Customer Limit Check for The Link Plus (gold)
+  const isPlusTier = profile?.tier === 'gold';
+  const hasReachedLimit = isPlusTier && profile?.role === 'tradesman' && customerIds.length >= (TIER_CONFIG.gold.customerLimit || 20);
+  const isExistingCustomer = job?.customerId && customerIds.includes(job.customerId);
+
+  if (hasReachedLimit && !isExistingCustomer && profile?.role === 'tradesman') {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6 bg-slate-50">
+        <div className="max-w-md w-full bg-white rounded-[3rem] p-12 text-center shadow-xl border border-slate-100">
+           <div className="w-20 h-20 bg-amber-500/10 rounded-full flex items-center justify-center mx-auto mb-8 text-amber-500">
+              <User className="w-10 h-10 shadow-glow" />
+           </div>
+           <h2 className="text-3xl font-black uppercase tracking-tight italic mb-4">Limit <span className="text-primary">Reached</span></h2>
+           <p className="text-slate-500 font-medium leading-relaxed mb-10 italic">
+              The Link Plus is limited to **{TIER_CONFIG.gold.customerLimit} unique customers**. You can continue invoicing existing customers, but to add new ones, you must upgrade to **The Link Legend**.
+           </p>
+           <button 
+             onClick={() => router.push('/dashboard/tradesman/profile')}
+             className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-widest text-xs hover:scale-105 transition-all shadow-xl shadow-black/10"
+           >
+             Go Legend
+           </button>
+           <button 
+             onClick={() => router.back()}
+             className="w-full py-4 text-slate-400 font-bold uppercase tracking-widest text-[10px] mt-4 hover:text-slate-600 transition-colors"
+           >
+             Back to Safety
            </button>
         </div>
       </div>
@@ -225,12 +333,12 @@ function InvoiceContent() {
 
   // Calculations
   const totals = lineItems.reduce((acc, item) => {
-    const itemTotalIncl = item.sellingIncl * item.quantity;
+    const itemTotalIncl = (item.sellingIncl || 0) * (item.quantity || 1);
     const isVatRegistered = profile?.isVatRegistered || false;
     
     // If registered, Subtotal = total/1.15. If NOT registered, Subtotal = total.
     const itemTotalExcl = isVatRegistered ? (itemTotalIncl / 1.15) : itemTotalIncl;
-    const itemCostTotal = item.costExcl * item.quantity;
+    const itemCostTotal = (item.costExcl || 0) * (item.quantity || 1);
     
     return {
       excl: acc.excl + itemTotalExcl,
@@ -240,9 +348,56 @@ function InvoiceContent() {
     };
   }, { excl: 0, incl: 0, vat: 0, cost: 0 });
 
+  const depositValue = depositType === 'percentage' 
+    ? (totals.incl * depositAmount) / 100 
+    : depositAmount;
+  
+  const balanceDue = totals.incl - depositValue;
+
   const profit = totals.excl - totals.cost;
   const gp = totals.excl > 0 ? (profit / totals.excl) * 100 : 0;
   const markup = totals.cost > 0 ? (profit / totals.cost) * 100 : 0;
+
+  const isFinalized = job?.status === 'billed' || job?.status === 'completed';
+
+  const handleMarkAsPaid = async () => {
+    if (!job || !activeInvoiceId) return;
+    setIsFinalizing(true);
+    try {
+         if (job.id === 'standalone') {
+            setJob(prev => prev ? { ...prev, isPaid: true, status: 'completed' } : prev);
+            return;
+         }
+         await markInvoiceAsPaid(job.id, activeInvoiceId);
+      setIsPaid(true);
+      setJob({ ...job, status: 'completed' });
+    } catch (err) {
+      console.error("Failed to mark as paid:", err);
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
+
+  const handleMarkDepositAsPaid = async () => {
+    if (!job) return;
+    setIsFinalizing(true);
+    try {
+      if (job.id === 'standalone') {
+        setJob(prev => prev ? { ...prev, depositPaid: true, amountPaid: (prev.amountPaid || 0) + depositValue } : prev);
+        setIsDepositPaid(true);
+        return;
+      }
+      await markDepositAsPaid(job.id, depositValue);
+      setIsDepositPaid(true);
+      // Refresh job data to get updated amountPaid
+      const updatedJob = await getJob(job.id);
+      if (updatedJob) setJob(updatedJob);
+    } catch (err) {
+      console.error("Failed to mark deposit as paid:", err);
+    } finally {
+      setIsFinalizing(false);
+    }
+  };
 
   const handleFinalize = async () => {
     if (!job || lineItems.length === 0) return;
@@ -261,6 +416,9 @@ function InvoiceContent() {
              status: 'billed',
              amount: totals.incl,
              total: totals.incl,
+             depositAmount,
+             depositType,
+             depositPaid: isDepositPaid,
              isStandalone: true,
              tradesmanId: user!.uid,
              lineItems,
@@ -276,6 +434,16 @@ function InvoiceContent() {
             status: 'issued'
           });
 
+          if (newJob.customerId) {
+            await createNotification({
+              userId: newJob.customerId,
+              type: 'invoice_issued',
+              title: 'New Invoice',
+              message: `An invoice of R${totals.incl.toFixed(2)} has been issued for your job.`,
+              jobId: newJob.id
+            });
+          }
+
           await handleDownloadPdf();
           router.push(`/jobs/view?id=${newJob.id}`);
         } catch (error) {
@@ -286,20 +454,36 @@ function InvoiceContent() {
         return;
     }
     try {
+      console.log("DEBUG: handleFinalize triggered", { jobId: job.id, lineItemsCount: lineItems.length });
       // 1. Update Job Status & Amounts
-      await updateJob(job.id, {
+      const finalUpdate: any = {
         status: 'billed',
         amount: totals.incl,
+        total: totals.incl,
+        depositAmount,
+        depositType,
+        depositPaid: isDepositPaid,
         lineItems,
         notes,
         billedAt: new Date()
-      });
+      };
+
+      // Ensure amountPaid reflects the deposit if it was marked as paid
+      if (isDepositPaid) {
+        finalUpdate.amountPaid = Math.max(job.amountPaid || 0, depositValue);
+      }
+
+      await updateJob(job.id, finalUpdate);
 
       // 2. Create tactical sub-collection record
       await createInvoice(job.id, {
         amount: totals.incl,
         lineItems,
         notes,
+        depositAmount,
+        depositType,
+        depositPaid: isDepositPaid,
+        reference: job.reference,
         status: 'issued'
       });
 
@@ -311,43 +495,55 @@ function InvoiceContent() {
         return Promise.resolve();
       }));
 
+      // 4. Notify customer
+      if (job.customerId) {
+        await createNotification({
+          userId: job.customerId,
+          type: 'invoice_issued',
+          title: 'New Invoice',
+          message: `An invoice of R${totals.incl.toFixed(2)} has been issued for your job.`,
+          jobId: job.id
+        });
+      }
+
+      alert("Strategic Success: Job finalized and invoice issued. Redirecting to mission overview...");
       router.push(`/jobs/view?id=${job.id}`);
-    } catch (error) {
+    } catch (error: any) {
       console.error('Finalization failed:', error);
+      alert(`Deployment Failed: ${error.message || 'Unknown protocol error'}. Please check your connection and try again.`);
     } finally {
       setIsFinalizing(false);
     }
   };
 
   const handleDownloadPdf = async () => {
-    const input = document.getElementById('pdf-document');
-    if (!input) return;
+    setIsFinalizing(true);
     try {
-      const canvas = await html2canvas(input, { scale: 1.5, useCORS: true });
-      const imgData = canvas.toDataURL('image/jpeg', 0.8);
-      const pdf = new jsPDF('p', 'pt', 'a4');
+      const canvas = await renderPdfCanvas('pdf-document');
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       pdf.save(`invoice_${id}.pdf`);
-    } catch (err) {
+    } catch (err: any) {
       console.error('PDF generation failed:', err);
+      alert(`PDF Error: ${err?.message || 'Rendering failed'}. Please try again.`);
+    } finally {
+      setIsFinalizing(false);
     }
   };
 
   const handleEmailPdf = async () => {
     if (!job?.customerEmail) {
-      alert("Please provide a client email address first.");
+      alert('Please provide a client email address first.');
       return;
     }
-    const input = document.getElementById('pdf-document');
-    if (!input) return;
-
     setIsEmailing(true);
     try {
-      const canvas = await html2canvas(input, { scale: 1.5, useCORS: true });
-      const imgData = canvas.toDataURL('image/jpeg', 0.8);
-      const pdf = new jsPDF('p', 'pt', 'a4');
+      const canvas = await renderPdfCanvas('pdf-document');
+      const imgData = canvas.toDataURL('image/jpeg', 0.85);
+      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
@@ -364,7 +560,6 @@ function InvoiceContent() {
           filename: `invoice_${job.id}.pdf`
         })
       });
-
       if (response.ok) {
         alert(`Invoice successfully delivered to ${job.customerEmail}`);
       } else {
@@ -372,8 +567,8 @@ function InvoiceContent() {
         throw new Error(err.error || 'Failed to deliver email');
       }
     } catch (err: any) {
-      console.error('Email delivery failed:', err);
-      alert("Secure Chat Error: " + err.message);
+      console.error('PDF email failed:', err);
+      alert(`PDF Error: ${err?.message || 'Failed to deliver invoice'}. Please retry.`);
     } finally {
       setIsEmailing(false);
     }
@@ -388,7 +583,19 @@ function InvoiceContent() {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 md:px-12 overflow-hidden relative">
       <div className="absolute -left-[9999px] -top-[9999px]">
-         <PdfDocument job={job} profile={profile!} lineItems={lineItems} totals={totals} type="Invoice" />
+         <PdfDocument 
+           job={{
+             ...job,
+             depositAmount,
+             depositType,
+             depositPaid: isDepositPaid,
+             notes
+           }} 
+           profile={proProfile || (profile?.role === 'tradesman' ? profile : null) as any} 
+           lineItems={lineItems} 
+           totals={totals} 
+           type="Invoice" 
+         />
       </div>
       <div className="max-w-7xl mx-auto space-y-12">
         {/* Header */}
@@ -403,10 +610,10 @@ function InvoiceContent() {
               <div>
                  <div className="flex items-center gap-2 text-primary font-black uppercase tracking-widest text-[10px] mb-2 italic">
                     <span className="w-8 h-[2px] bg-primary"></span>
-                    Mission Invoice
+                    Job Invoice
                  </div>
                  <h1 className="text-4xl font-black tracking-tighter text-slate-900 uppercase italic">
-                    Billing <span className="text-primary">Architect</span>
+                    {isFinalized ? 'Tax ' : 'Billing '}<span className="text-primary">{isFinalized ? 'Invoice' : 'Architect'}</span>
                  </h1>
               </div>
            </div>
@@ -414,10 +621,10 @@ function InvoiceContent() {
            <div className="flex flex-col gap-2">
               <div className="flex items-center gap-4 p-2 bg-white rounded-[2rem] border border-slate-100 shadow-sm self-start">
                  <div className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest italic">
-                    {job?.status || 'Active Mission'}
+                    {job?.status || 'Active Job'}
                  </div>
                  <div className="px-6 py-3 text-slate-400 text-[10px] font-black uppercase tracking-widest">
-                    ID: {id.slice(0, 8)}
+                    REF: {job?.reference || id.slice(0, 8)}
                  </div>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -461,7 +668,7 @@ function InvoiceContent() {
                        <div className="flex-1 space-y-3">
                           <div className="flex items-center justify-between">
                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Client Focus</p>
-                             {recentCustomers.length > 0 && (
+                             {recentCustomers.length > 0 && !isCustomer && (
                                 <div className="relative">
                                    <button 
                                      onClick={() => setIsCustomerSelectOpen(!isCustomerSelectOpen)}
@@ -502,7 +709,8 @@ function InvoiceContent() {
                             placeholder="Enter Client Name..." 
                             value={job?.customerName || ''}
                             onChange={(e) => setJob({ ...job!, customerName: e.target.value })}
-                            className="text-2xl font-black text-slate-900 tracking-tight uppercase italic bg-slate-50 border-transparent rounded-xl px-4 py-2 outline-none focus:border-primary shadow-inner w-full"
+                            disabled={isFinalized || isCustomer}
+                            className="text-2xl font-black text-slate-900 tracking-tight uppercase italic bg-slate-50 border-transparent rounded-xl px-4 py-2 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
                           />
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             <input 
@@ -510,14 +718,16 @@ function InvoiceContent() {
                               placeholder="Phone Number" 
                               value={job?.customerPhone || ''}
                               onChange={(e) => setJob({ ...job!, customerPhone: e.target.value })}
-                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                              disabled={isFinalized || isCustomer}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
                             />
                             <input 
                               type="email" 
                               placeholder="Email Address" 
                               value={job?.customerEmail || ''}
                               onChange={(e) => setJob({ ...job!, customerEmail: e.target.value })}
-                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                              disabled={isFinalized || isCustomer}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
                             />
                           </div>
                          <LocationSearch 
@@ -525,14 +735,15 @@ function InvoiceContent() {
                            onLocationSelect={(address, lat, lng) => {
                               setJob({ ...job!, customerAddress: address, location: address, locationData: { address, lat, lng } });
                            }}
+                           disabled={isFinalized || isCustomer}
                            className="w-full"
                          />
                        </div>
                     </div>
                  </div>
                 <div className="text-right">
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Mission Launch</p>
-                   <p className="text-sm font-bold text-slate-700">{new Date(job?.createdAt?.seconds * 1000).toLocaleDateString() || 'Today'}</p>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Job Launch</p>
+                   <p className="text-sm font-bold text-slate-700">{job?.createdAt && job.createdAt.seconds ? new Date(job.createdAt.seconds * 1000).toLocaleDateString() : 'Today'}</p>
                 </div>
              </div>
 
@@ -541,12 +752,15 @@ function InvoiceContent() {
                 <div className="flex items-center justify-between mb-2">
                    <h3 className="text-2xl font-black tracking-tight uppercase italic">Line <span className="text-primary">Intelligence</span></h3>
                    <div className="flex items-center gap-4">
-                      <button 
-                        onClick={() => addLineItem()}
-                        className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm"
-                      >
-                         <Plus className="w-5 h-5" />
-                      </button>
+                      {!isCustomer && (
+                          <button 
+                            onClick={() => addLineItem()}
+                            disabled={isFinalized}
+                            className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm disabled:opacity-50"
+                          >
+                             <Plus className="w-5 h-5" />
+                          </button>
+                      )}
                    </div>
                 </div>
 
@@ -563,34 +777,42 @@ function InvoiceContent() {
                           <div className="flex-1 space-y-1 w-full relative">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Inventory Link</label>
                              <div className="flex gap-2 relative">
-                                <select 
-                                  value={item.inventoryId || ''}
-                                  onChange={(e) => {
-                                    const selectedItem = inventory.find(inv => inv.id === e.target.value);
-                                    if (selectedItem) {
-                                       updateItem(item.id, {
-                                          inventoryId: selectedItem.id,
-                                          name: selectedItem.name,
-                                          unitType: selectedItem.unitType,
-                                          costExcl: selectedItem.costExcl,
-                                          sellingIncl: selectedItem.sellingIncl
-                                       });
-                                    }
-                                  }}
-                                  className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary shadow-sm appearance-none"
-                                >
-                                  <option value="" disabled>Select from Inventory...</option>
-                                  {inventory.map(inv => (
-                                     <option key={inv.id} value={inv.id}>{inv.name} (R{inv.sellingIncl.toFixed(2)})</option>
-                                  ))}
-                                </select>
-                                <button 
-                                  onClick={() => setIsQuickAddOpen(true)}
-                                  className="shrink-0 aspect-square p-4 bg-white text-slate-400 border border-transparent rounded-xl hover:text-primary hover:border-primary/20 shadow-sm transition-all"
-                                  title="Add new stock inline"
-                                >
-                                   <Plus className="w-4 h-4" />
-                                </button>
+                                {isCustomer ? (
+                                  <div className="w-full bg-white p-4 rounded-xl text-[11px] font-bold shadow-sm">{item.name || 'Untitled Service'}</div>
+                                ) : (
+                                  <>
+                                    <select 
+                                      value={item.inventoryId || ''}
+                                      disabled={isFinalized}
+                                      onChange={(e) => {
+                                        const selectedItem = inventory.find(inv => inv.id === e.target.value);
+                                        if (selectedItem) {
+                                           updateItem(item.id, {
+                                              inventoryId: selectedItem.id,
+                                              name: selectedItem.name,
+                                              unitType: selectedItem.unitType,
+                                              costExcl: selectedItem.costExcl,
+                                              sellingIncl: selectedItem.sellingIncl
+                                           });
+                                        }
+                                      }}
+                                      className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary shadow-sm appearance-none disabled:opacity-70"
+                                    >
+                                      <option value="" disabled>Select from Inventory...</option>
+                                      {inventory.map(inv => (
+                                         <option key={inv.id} value={inv.id}>{inv.name} (R{inv.sellingIncl.toFixed(2)})</option>
+                                      ))}
+                                    </select>
+                                    <button 
+                                      onClick={() => setIsQuickAddOpen(true)}
+                                      disabled={isFinalized}
+                                      className="shrink-0 aspect-square p-4 bg-white text-slate-400 border border-transparent rounded-xl hover:text-primary hover:border-primary/20 shadow-sm transition-all disabled:opacity-50"
+                                      title="Add new stock inline"
+                                    >
+                                       <Plus className="w-4 h-4" />
+                                    </button>
+                                  </>
+                                )}
                              </div>
                           </div>
                           <div className="w-24 space-y-1">
@@ -598,8 +820,9 @@ function InvoiceContent() {
                              <input 
                                type="number"
                                value={item.quantity}
+                               disabled={isFinalized || isCustomer}
                                onChange={(e) => updateItem(item.id, { quantity: parseFloat(e.target.value) })}
-                               className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary text-center shadow-sm"
+                               className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary text-center shadow-sm disabled:opacity-70"
                              />
                           </div>
                           <div className="w-32 space-y-1">
@@ -632,12 +855,15 @@ function InvoiceContent() {
                                 </div>
                              )}
                           </div>
-                          <button 
-                            onClick={() => removeLineItem(item.id)}
-                            className="p-4 bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl shadow-sm transition-all shrink-0"
-                          >
-                             <Trash2 className="w-4 h-4" />
-                          </button>
+                          {!isCustomer && (
+                            <button 
+                               onClick={() => removeLineItem(item.id)}
+                               disabled={isFinalized}
+                               className="p-4 bg-white text-slate-300 hover:text-red-500 hover:bg-red-50 rounded-xl shadow-sm transition-all shrink-0 disabled:opacity-50"
+                            >
+                               <Trash2 className="w-4 h-4" />
+                            </button>
+                          )}
                        </motion.div>
                      ))}
                    </AnimatePresence>
@@ -652,103 +878,242 @@ function InvoiceContent() {
              </div>
 
              {/* Inventory Direct Injection */}
-             <div className="space-y-4">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic ml-4 flex items-center gap-2">
-                   <Package className="w-3 h-3" /> Professional Catalog Injection
-                </p>
-                <div className="flex flex-wrap gap-3">
-                   {inventory.map((invItem) => (
-                      <button 
-                        key={invItem.id}
-                        onClick={() => addLineItem(invItem)}
-                        className="px-6 py-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-primary hover:text-primary transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic group"
-                      >
-                         <Plus className="w-4 h-4 text-slate-300 group-hover:text-primary transition-colors" />
-                         {invItem.name}
-                         <span className="text-slate-300 font-medium normal-case">({UNIT_TYPES.find(u => u.id === invItem.unitType)?.short})</span>
-                      </button>
-                   ))}
+             {!isCustomer && (
+                <div className="space-y-4">
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic ml-4 flex items-center gap-2">
+                      <Package className="w-3 h-3" /> Professional Catalog Injection
+                   </p>
+                   <div className="flex flex-wrap gap-3">
+                      {inventory.map((invItem) => (
+                         <button 
+                           key={invItem.id}
+                           disabled={isFinalized}
+                           onClick={() => addLineItem(invItem)}
+                           className="px-6 py-4 bg-white rounded-2xl border border-slate-100 shadow-sm hover:border-primary hover:text-primary transition-all flex items-center gap-3 text-[10px] font-black uppercase tracking-widest italic group disabled:opacity-50 disabled:cursor-not-allowed"
+                         >
+                            <Plus className="w-4 h-4 text-slate-300 group-hover:text-primary transition-colors" />
+                            {invItem.name}
+                            <span className="text-slate-300 font-medium normal-case">({UNIT_TYPES.find(u => u.id === invItem.unitType)?.short})</span>
+                         </button>
+                      ))}
+                   </div>
                 </div>
-             </div>
+             )}
           </div>
 
           {/* Right: Financial Pulse Panel */}
           <div className="lg:col-span-4 space-y-8">
              {/* The Profit Engine (Professional Only) */}
-             <div className="bg-slate-900 rounded-[3.5rem] p-10 shadow-2xl relative overflow-hidden transform group hover:scale-[1.02] transition-all border border-white/5">
-                <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[50px] -mr-16 -mt-16"></div>
-                
-                <div className="flex items-center justify-between mb-8">
-                   <span className="px-3 py-1 bg-primary/20 border border-primary/30 rounded-lg text-[9px] font-black text-primary uppercase tracking-[0.2em] italic">Hero Logic</span>
-                   <TrendingUp className="w-5 h-5 text-primary shadow-glow" />
-                </div>
+              {profile?.role === 'tradesman' && (
+                 <div className="bg-slate-900 rounded-[3.5rem] p-10 shadow-2xl relative overflow-hidden transform group hover:scale-[1.02] transition-all border border-white/5">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-primary/20 rounded-full blur-[50px] -mr-16 -mt-16"></div>
+                    
+                    <div className="flex items-center justify-between mb-8">
+                       <span className="px-3 py-1 bg-primary/20 border border-primary/30 rounded-lg text-[9px] font-black text-primary uppercase tracking-[0.2em] italic">Hero Logic</span>
+                       <TrendingUp className="w-5 h-5 text-primary shadow-glow" />
+                    </div>
 
-                <h3 className="text-white font-black text-xl tracking-tight mb-8 uppercase italic">Profit <span className="text-primary">Engine</span></h3>
+                    <h3 className="text-white font-black text-xl tracking-tight mb-8 uppercase italic">Profit <span className="text-primary">Engine</span></h3>
 
-                <div className="space-y-6 mb-10">
-                   <div className="flex items-center justify-between px-6 py-4 bg-white/5 rounded-2xl border border-white/10">
-                      <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Operational Cost</span>
-                      <span className="text-lg font-black text-white tracking-tighter">R {totals.cost.toFixed(2)}</span>
-                   </div>
-                   <div className="flex items-center justify-between px-6 py-4 bg-green-500/10 rounded-2xl border border-green-500/20">
-                      <span className="text-[10px] font-black text-green-500 uppercase tracking-widest italic">Net Profit (Excl)</span>
-                      <span className="text-lg font-black text-white tracking-tighter">R {profit.toFixed(2)}</span>
-                   </div>
-                </div>
+                    <div className="space-y-6 mb-10">
+                       <div className="flex items-center justify-between px-6 py-4 bg-white/5 rounded-2xl border border-white/10">
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Operational Cost</span>
+                          <span className="text-lg font-black text-white tracking-tighter">R {totals.cost.toFixed(2)}</span>
+                       </div>
+                       <div className="flex items-center justify-between px-6 py-4 bg-green-500/10 rounded-2xl border border-green-500/20">
+                          <span className="text-[10px] font-black text-green-500 uppercase tracking-widest italic">Net Profit (Excl)</span>
+                          <span className="text-lg font-black text-white tracking-tighter">R {profit.toFixed(2)}</span>
+                       </div>
+                    </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                   <div className="p-6 bg-white/5 rounded-[2rem] text-center border border-white/5 hover:border-primary/30 transition-all">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">GP %</p>
-                      <p className="text-2xl font-black text-primary italic tracking-tight">{gp.toFixed(1)}%</p>
-                   </div>
-                   <div className="p-6 bg-white/5 rounded-[2rem] text-center border border-white/5 hover:border-accent/30 transition-all">
-                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Markup %</p>
-                      <p className="text-2xl font-black text-accent italic tracking-tight">{markup.toFixed(1)}%</p>
-                   </div>
-                </div>
+                    <div className="grid grid-cols-2 gap-4">
+                       <div className="p-6 bg-white/5 rounded-[2rem] text-center border border-white/5 hover:border-primary/30 transition-all">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">GP %</p>
+                          <p className="text-2xl font-black text-primary italic tracking-tight">{gp.toFixed(1)}%</p>
+                       </div>
+                       <div className="p-6 bg-white/5 rounded-[2rem] text-center border border-white/5 hover:border-accent/30 transition-all">
+                          <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1 italic">Markup %</p>
+                          <p className="text-2xl font-black text-accent italic tracking-tight">{markup.toFixed(1)}%</p>
+                       </div>
+                    </div>
 
-                <p className="mt-8 text-[9px] font-black text-slate-500 text-center uppercase tracking-widest italic">
-                   This panel is strictly private to your hero profile.
-                </p>
-             </div>
+                    <p className="mt-8 text-[9px] font-black text-slate-500 text-center uppercase tracking-widest italic">
+                       This panel is strictly private to your hero profile.
+                    </p>
+                 </div>
+              )}
 
              {/* Customer Facing Total */}
              <div className="bg-white rounded-[3.5rem] p-10 border border-slate-100 shadow-xl space-y-8">
-                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic text-center">Final Mission Value</p>
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic text-center">Final Job Value</p>
                 
                 <div className="space-y-4">
-                   {profile?.isVatRegistered && (
-                      <>
-                         <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                            <span className="uppercase tracking-widest opacity-60">Subtotal (Excl)</span>
-                            <span>R {totals.excl.toFixed(2)}</span>
-                         </div>
-                         <div className="flex items-center justify-between text-xs font-bold text-slate-600">
-                            <span className="uppercase tracking-widest opacity-60">VAT (15.0%)</span>
-                            <span>R {totals.vat.toFixed(2)}</span>
-                         </div>
-                      </>
-                   )}
-                   <div className="pt-6 border-t border-slate-50 flex items-center justify-between">
-                      <span className="text-[10px] font-black text-slate-900 uppercase tracking-widest italic">Hero Total</span>
-                      <span className="text-4xl font-black text-slate-900 tracking-tighter">R {totals.incl.toFixed(2)}</span>
+                   <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+                      <span className="uppercase tracking-widest opacity-60">Subtotal (Excl)</span>
+                      <span>R {totals.excl.toFixed(2)}</span>
                    </div>
+                   {profile?.isVatRegistered && (
+                       <div className="flex justify-between text-xs font-black text-slate-400 uppercase tracking-widest italic">
+                          <span>Value Added Tax (15%)</span>
+                          <span>R {totals.vat.toFixed(2)}</span>
+                       </div>
+                    )}
+
+                    <div className="pt-6 border-t border-slate-100 mt-6">
+                       <div className="flex items-center justify-between mb-4">
+                          <div className="flex items-center gap-2">
+                             <div className="p-2 bg-primary/10 rounded-lg">
+                                <ShieldCheck className="w-4 h-4 text-primary" />
+                             </div>
+                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Deposit Required</span>
+                          </div>
+                          <div className="flex bg-slate-100 p-1 rounded-xl">
+                             <button 
+                               onClick={() => setDepositType('percentage')}
+                               disabled={isFinalized || isDepositPaid || isCustomer}
+                               className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase transition-all ${depositType === 'percentage' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                             >
+                                %
+                             </button>
+                             <button 
+                               onClick={() => setDepositType('fixed')}
+                               disabled={isFinalized || isDepositPaid || isCustomer}
+                               className={`px-3 py-1 rounded-lg text-[9px] font-black uppercase transition-all ${depositType === 'fixed' ? 'bg-white text-primary shadow-sm' : 'text-slate-400'}`}
+                             >
+                                R
+                             </button>
+                          </div>
+                       </div>
+                       <div className="flex items-center justify-between">
+                          <input 
+                            type="number"
+                            value={depositAmount || ''}
+                            disabled={isFinalized || isDepositPaid || isCustomer}
+                            onChange={(e) => setDepositAmount(Number(e.target.value))}
+                            placeholder="0.00"
+                            className="bg-slate-50 border-transparent rounded-xl px-4 py-3 text-sm font-black text-slate-900 outline-none focus:border-primary shadow-inner w-32 disabled:opacity-70"
+                          />
+                          <div className="text-right flex flex-col items-end gap-2">
+                             <div>
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic mb-1">Deposit Value</p>
+                                <p className="text-sm font-black text-slate-900 flex items-center justify-end gap-2">
+                                   R {depositValue.toFixed(2)}
+                                   {isDepositPaid && (
+                                      <span className="p-1 bg-green-500/10 text-green-500 rounded-md border border-green-500/20 shadow-glow">
+                                         <CheckCircle2 className="w-2.5 h-2.5" />
+                                      </span>
+                                   )}
+                                </p>
+                             </div>
+                             {!isDepositPaid && depositValue > 0 && !isFinalized && !isCustomer && (
+                                <button 
+                                  onClick={() => setIsDepositPaid(true)}
+                                  className="px-3 py-1 bg-primary/10 text-primary rounded-lg text-[8px] font-black uppercase hover:bg-primary hover:text-white transition-all italic border border-primary/20 shadow-sm"
+                                >
+                                   Subtract from Total
+                                </button>
+                             )}
+                          </div>
+                       </div>
+                    </div>
+
+                    <div className="pt-6 border-t border-slate-100">
+                        <div className="space-y-2 mb-6">
+                           <div className="flex justify-between items-center text-slate-500">
+                              <span className="text-[10px] font-bold uppercase tracking-widest">Total Project Value</span>
+                              <span className="font-bold">R {totals.incl.toFixed(2)}</span>
+                           </div>
+                           {depositAmount > 0 && (
+                              <div className="flex justify-between items-center text-slate-500">
+                                 <span className="text-[10px] font-bold uppercase tracking-widest flex items-center gap-1">
+                                    Deposit {isDepositPaid && <CheckCircle2 className="w-3 h-3 text-green-500" />}
+                                 </span>
+                                 <span className="font-bold text-orange-600">- R {depositValue.toFixed(2)}</span>
+                              </div>
+                           )}
+                        </div>
+
+                        <div className="flex items-center justify-between p-6 bg-slate-900 text-white rounded-3xl shadow-xl">
+                           <div className="flex flex-col">
+                              <div className="flex items-center gap-2 mb-1">
+                                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Outstanding Amount</span>
+                                 <div className="p-1 bg-white/10 rounded-md">
+                                    <DollarSign className="w-2.5 h-2.5 text-white" />
+                                 </div>
+                              </div>
+                              <span className="text-3xl font-black">R {balanceDue.toFixed(2)}</span>
+                           </div>
+                           <div className="text-right">
+                              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic block mb-1">Status</span>
+                              <span className={`text-xs font-black uppercase tracking-widest ${isPaid ? 'text-green-400' : 'text-orange-400'}`}>
+                                 {isPaid ? 'Paid' : 'Awaiting Payment'}
+                              </span>
+                           </div>
+                        </div>
+                     </div>
+
+                    {!isPaid && !isDepositPaid && depositAmount > 0 && profile?.role === 'tradesman' && (
+                       <div className="pt-6">
+                          <button 
+                            onClick={handleMarkDepositAsPaid}
+                            disabled={isFinalizing}
+                            className="w-full py-4 bg-orange-500/10 text-orange-600 rounded-2xl font-black uppercase tracking-widest text-[10px] hover:bg-orange-500 hover:text-white transition-all flex items-center justify-center gap-2"
+                          >
+                             {isFinalizing ? <Loader2 className="w-4 h-4 animate-spin" /> : (
+                                <>
+                                   Mark Deposit as Paid
+                                   <ShieldCheck className="w-4 h-4" />
+                                </>
+                             )}
+                          </button>
+                       </div>
+                    )}
                 </div>
 
-                <button 
-                  onClick={handleFinalize}
-                  disabled={isFinalizing || lineItems.length === 0}
-                  className="w-full py-8 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-primary/30 flex items-center justify-center gap-4 group"
-                >
-                   {isFinalizing ? (
-                     <Loader2 className="w-6 h-6 animate-spin" />
-                   ) : (
-                     <>
-                        Finalize Mission
-                        <CheckCircle2 className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                     </>
-                   )}
-                </button>
+                {isPaid ? (
+                   <div className="w-full py-8 bg-green-500 text-white rounded-[2rem] font-black uppercase tracking-widest text-sm shadow-2xl shadow-green-500/30 flex items-center justify-center gap-4">
+                      PAID IN FULL
+                      <CheckCircle2 className="w-6 h-6" />
+                   </div>
+                ) : isFinalized ? (
+                   <div className="space-y-4">
+                      {profile?.role === 'tradesman' && (
+                         <button 
+                            onClick={handleMarkAsPaid}
+                            disabled={isFinalizing}
+                            className="w-full py-8 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-green-600/30 flex items-center justify-center gap-4 group"
+                         >
+                            {isFinalizing ? (
+                               <Loader2 className="w-6 h-6 animate-spin" />
+                            ) : (
+                               <>
+                                  Mark as Paid
+                                  <DollarSign className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                               </>
+                            )}
+                         </button>
+                      )}
+                      <div className="w-full py-6 bg-slate-100 text-slate-400 rounded-[2rem] font-black uppercase tracking-widest text-xs flex items-center justify-center gap-4">
+                         INVOICE FINALIZED
+                         <ShieldCheck className="w-4 h-4" />
+                      </div>
+                   </div>
+                ) : (
+                   <button 
+                     onClick={handleFinalize}
+                     disabled={isFinalizing || lineItems.length === 0}
+                     className="w-full py-8 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-primary/30 flex items-center justify-center gap-4 group"
+                   >
+                      {isFinalizing ? (
+                        <Loader2 className="w-6 h-6 animate-spin" />
+                      ) : (
+                        <>
+                           Finalize Job
+                           <CheckCircle2 className="w-6 h-6 group-hover:scale-110 transition-transform" />
+                        </>
+                      )}
+                   </button>
+                )}
              </div>
 
              {/* VAT Status Banner */}

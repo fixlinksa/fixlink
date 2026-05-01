@@ -48,35 +48,48 @@ export const TRADES = [
 ];
 
 export const TIER_CONFIG = {
-  starter: { 
-    id: 'starter',
-    name: 'Link Starter', 
-    radius: 15, 
-    canInvoice: false, 
-    canEstimate: false, 
-    showRatings: false,
-    color: 'slate'
-  },
-  missing: { 
-    id: 'missing',
-    name: 'Missing Link', 
-    radius: 50, 
-    canInvoice: true, 
-    canEstimate: true, 
-    showRatings: false,
-    color: 'primary',
-    maxItems: 150
-  },
-  legend: { 
-    id: 'legend',
-    name: 'Link Legend', 
-    radius: 70, 
+  platinum: { 
+    id: 'platinum',
+    name: 'The Link Legend', 
+    radius: 500, 
+    price: 850,
+    delayHours: 0,
     canInvoice: true, 
     canEstimate: true, 
     showRatings: true,
     color: 'accent',
-    regionalFlexibility: true,
-    maxItems: 500
+    priority: 3,
+    description: 'The ultimate professional ecosystem for maximum dominance.',
+    features: ['500km Regional Radius', 'Instant Lead Access', 'Invoicing & Estimates', 'Elite Rating Protocol']
+  },
+  gold: { 
+    id: 'gold',
+    name: 'The Missing Link', 
+    radius: 70, 
+    price: 550,
+    delayHours: 0,
+    canInvoice: true, 
+    canEstimate: true, 
+    showRatings: true,
+    color: 'primary',
+    priority: 2,
+    customerLimit: 20,
+    description: 'Power up your business with invoicing and professional reach.',
+    features: ['70km Operational Radius', 'Instant Lead Access', 'Invoicing & Estimates', '20 Customer Limit']
+  },
+  starter: { 
+    id: 'starter',
+    name: 'The Link Starter', 
+    radius: 70, 
+    price: 0,
+    delayHours: 0,
+    canInvoice: false, 
+    canEstimate: false, 
+    showRatings: false,
+    color: 'slate',
+    priority: 1,
+    description: 'Essential lead discovery to get your business started.',
+    features: ['70km Visibility Radius', 'Lead Discovery', 'Basic Profile', 'No Invoicing/Estimates']
   }
 } as const;
 

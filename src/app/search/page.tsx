@@ -2,6 +2,7 @@
 
 import React, { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import ReactDOMServer from 'react-dom/server';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Search, 
@@ -22,13 +23,22 @@ import {
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import 'leaflet/dist/leaflet.css';
+import 'leaflet.markercluster/dist/MarkerCluster.css';
+import 'leaflet.markercluster/dist/MarkerCluster.Default.css';
 import { useAuth } from '@/context/AuthContext';
 import { TRADES } from '@/lib/constants';
 import { createChatThread, getUsersByRole, getProsByTrade, getDistance, extractCoordinates } from '@/lib/db';
+import LocationSearch from '@/components/jobs/LocationSearch';
 
 // Helper to normalize search categories to exact database trade labels
 const normalizeTrade = (query: string): string => {
-  const q = query.toLowerCase();
+  const q = query.toLowerCase().trim();
+  
+  // Handle "All Services" or "All" variants
+  if (q === 'all' || q === 'all services' || q === 'any' || q === 'everything') {
+    return 'General Services';
+  }
+
   if (q === 'general services') return 'General Services';
   
   // Mapping of common categories to exact TRADES list entries
@@ -41,12 +51,18 @@ const normalizeTrade = (query: string): string => {
     'cooling': 'Air Conditioning & HVAC Technicians',
     'security': 'Security System & CCTV Installers',
     'roofing': 'Roofing Specialists (Thatch, Tile, & Sheet Metal)',
+    'cleaning': 'Cleaners (Residential & Commercial)',
+    'construction': 'General Building Contractors',
   };
 
   if (mapping[q]) return mapping[q];
   
   // Fuzzy match against TRADES list
-  const closest = TRADES.find(t => t.toLowerCase().includes(q) || q.includes(t.toLowerCase().split(' ')[0].toLowerCase()));
+  const closest = TRADES.find(t => 
+    t.toLowerCase().includes(q) || 
+    q.includes(t.toLowerCase().split(' ')[0].toLowerCase())
+  );
+  
   return closest || query;
 };
 
@@ -108,6 +124,10 @@ const ZoomControl = dynamic(
   () => import('react-leaflet').then((mod) => mod.ZoomControl),
   { ssr: false }
 );
+const LayersControl = dynamic(
+  () => import('react-leaflet').then((mod) => mod.LayersControl),
+  { ssr: false }
+);
 const Popup = dynamic(
   () => import('react-leaflet').then((mod) => mod.Popup),
   { ssr: false }
@@ -115,7 +135,11 @@ const Popup = dynamic(
 const Tooltip = dynamic(
   () => import('react-leaflet').then((mod) => mod.Tooltip),
   { ssr: false }
-) as any;
+);
+const MarkerClusterGroup = dynamic(
+  () => import('react-leaflet-cluster'),
+  { ssr: false }
+);
 
 // Map initialization is handled within the component to prevent SSR errors
 
@@ -132,17 +156,28 @@ const MapEffect = ({ activeTab, markers }: { activeTab: string; markers: any[] }
     }, 100);
   }, [activeTab, map]);
 
+  const hasFitted = React.useRef(false);
+
   React.useEffect(() => {
-    if (markers.length > 0) {
+    // Reset the fit flag when markers actually change (new search)
+    hasFitted.current = false;
+  }, [markers]);
+
+  React.useEffect(() => {
+    if (markers.length > 0 && !hasFitted.current) {
       const L = require('leaflet');
-      // Filter out any markers that might have invalid coordinates during rendering
       const validPoints = markers
-        .filter(m => m.location && Array.isArray(m.location))
-        .map(m => m.location as [number, number]);
+        .filter(m => m.mapCoords && Array.isArray(m.mapCoords))
+        .map(m => m.mapCoords as [number, number]);
       
       if (validPoints.length > 0) {
-        const bounds = L.latLngBounds(validPoints);
-        map.fitBounds(bounds, { padding: [50, 50], maxZoom: 14 });
+        try {
+          const bounds = L.latLngBounds(validPoints);
+          map.fitBounds(bounds, { padding: [40, 40], maxZoom: 16 });
+          hasFitted.current = true;
+        } catch (e) {
+          console.error('Error fitting bounds:', e);
+        }
       }
     }
   }, [markers, map]);
@@ -158,8 +193,38 @@ function SearchResultsContent() {
   const locationParam = searchParams.get('address') || searchParams.get('loc') || 'Central Cape Town';
   const latParam = searchParams.get('lat');
   const lngParam = searchParams.get('lng');
+  const hasLocation = !!(latParam && lngParam);
+  
+  console.log('Search Debug:', { latParam, lngParam, hasLocation });
   
   const [activeTab, setActiveTab] = useState<'list' | 'map'>('map');
+  const [currentZoom, setCurrentZoom] = useState(13);
+  const [pinnedMarkerId, setPinnedMarkerId] = useState<string | null>(null);
+  const [hoveredMarkerId, setHoveredMarkerId] = useState<string | null>(null);
+  const [mapMode, setMapMode] = useState<'normal' | 'satellite'>('normal');
+  const closeTimeout = React.useRef<NodeJS.Timeout | null>(null);
+  const mapInstanceRef = React.useRef<any>(null);
+
+  // Zoom tracker component
+  const MapZoomTracker = () => {
+    // Safely require useMapEvents inside the component to avoid SSR/Reference errors
+    const leaflet = require('react-leaflet');
+    if (!leaflet || !leaflet.useMapEvents) return null;
+    
+    const map = leaflet.useMapEvents({
+      zoomend: () => {
+        const newZoom = map.getZoom();
+        console.log("Zoom changed to:", newZoom);
+        setCurrentZoom(newZoom);
+      },
+      popupclose: () => {
+        setPinnedMarkerId(null);
+      }
+    });
+    mapInstanceRef.current = map;
+    return null;
+  };
+  
   const [selectedTrade, setSelectedTrade] = useState<string>(queryParam);
   const [tradeSearch, setTradeSearch] = useState<string>('');
   const [isCategoryOpen, setIsCategoryOpen] = useState(false);
@@ -167,30 +232,88 @@ function SearchResultsContent() {
   const [loading, setLoading] = useState(true);
   const [mapIcons, setMapIcons] = useState<any>(null);
 
-  // Initialize Leaflet icons safely on the client
+  // Helper to create a premium badge icon for each professional
+  const createProIcon = (pro: any) => {
+    if (typeof window === 'undefined') return null;
+    const L = require('leaflet');
+    
+    const isHovered = hoveredMarkerId === pro.id;
+    const isPinned = pinnedMarkerId === pro.id;
+    
+    const trade = Array.isArray(pro.trade) ? pro.trade[0] : (pro.trade || pro.trades?.[0] || 'Professional');
+    const rating = pro.rating?.toFixed(1) || '5.0';
+    const isPremium = pro.tier === 'platinum' || pro.featured;
+    
+    // Scale factor based on zoom - professionals get smaller when zooming out
+    const zoomScale = Math.max(0.4, 1 + (currentZoom - 13) * 0.15);
+    const baseWidth = 140;
+    const baseHeight = 50;
+    
+    return L.divIcon({
+      className: 'pro-badge-icon',
+      html: ReactDOMServer.renderToString(
+        <div 
+          className={`flex flex-col items-center group transition-all duration-300 ${(isPinned || isHovered) ? 'scale-110 z-[1000]' : 'hover:scale-105 z-[100]'}`} 
+          style={{ transformOrigin: 'bottom center', transform: `scale(${zoomScale})` }}
+        >
+          <div className={`relative flex items-center bg-white rounded-2xl shadow-2xl border-2 ${isPremium ? 'border-[#f43f5e]' : 'border-slate-200'} overflow-hidden transition-all duration-300 group-hover:scale-105`}>
+            {/* Left Side: Profile/Icon */}
+            <div className={`w-10 h-10 flex-shrink-0 bg-slate-50 flex items-center justify-center border-r ${isPremium ? 'border-[#f43f5e]/20' : 'border-slate-100'}`}>
+              {pro.image || pro.companyLogoUrl ? (
+                <img src={pro.image || pro.companyLogoUrl} className="w-full h-full object-cover" alt="" />
+              ) : (
+                <div className="text-[#0f172a] font-black text-xs uppercase">{(pro.name || pro.companyName || 'P').charAt(0)}</div>
+              )}
+            </div>
+            
+            {/* Right Side: Details */}
+            <div className="px-3 py-1.5 flex flex-col min-w-[80px]">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-[10px] font-black text-slate-900 truncate max-w-[80px] uppercase tracking-tight">{pro.name || pro.companyName}</span>
+                <div className="flex items-center gap-0.5">
+                  <svg className="w-2.5 h-2.5 text-[#f43f5e] fill-[#f43f5e]" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                  <span className="text-[10px] font-bold text-slate-700">{rating}</span>
+                </div>
+              </div>
+              <span className="text-[8px] font-bold text-[#0f172a] uppercase tracking-widest truncate max-w-[100px]">{trade}</span>
+            </div>
+            
+            {isPremium && <div className="absolute top-0 right-0 w-2 h-2 bg-[#f43f5e] rounded-bl-full shadow-sm"></div>}
+          </div>
+          {/* Pointer */}
+          <div className={`w-0 h-0 border-l-[6px] border-l-transparent border-r-[6px] border-r-transparent border-t-[8px] ${isPremium ? 'border-t-[#f43f5e]' : 'border-t-slate-200'} -mt-0.5 drop-shadow-lg`}></div>
+        </div>
+      ),
+      iconSize: [baseWidth * zoomScale, baseHeight * zoomScale],
+      iconAnchor: [(baseWidth * zoomScale) / 2, baseHeight * zoomScale],
+      popupAnchor: [0, -baseHeight * zoomScale]
+    });
+  };
+
+  // Initialize center icon separately
   React.useEffect(() => {
     if (typeof window !== 'undefined') {
       const L = require('leaflet');
       const icons = {
-        default: L.icon({
-          iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-          iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41]
-        }),
-        center: L.icon({
-          iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-gold.png',
-          shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-          iconSize: [25, 41],
-          iconAnchor: [12, 41],
-          popupAnchor: [1, -34],
-          shadowSize: [41, 41]
+        center: L.divIcon({
+          className: 'center-icon',
+          html: `
+            <div class="flex flex-col items-center">
+              <div class="w-12 h-12 bg-white rounded-full border-[4px] border-primary flex items-center justify-center shadow-2xl relative">
+                <div class="absolute inset-0 rounded-full bg-primary/20 animate-ping"></div>
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#f43f5e" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <circle cx="12" cy="12" r="3"></circle>
+                </svg>
+              </div>
+              <div class="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[12px] border-t-white -mt-1 shadow-xl"></div>
+            </div>
+          `,
+          iconSize: [48, 60],
+          iconAnchor: [24, 60],
+          popupAnchor: [0, -60]
         })
       };
-      L.Marker.prototype.options.icon = icons.default;
       setMapIcons(icons);
     }
   }, []);
@@ -203,6 +326,10 @@ function SearchResultsContent() {
   const zoomLevel = latParam && lngParam ? 14 : 12;
 
   React.useEffect(() => {
+    if (!hasLocation) {
+      setLoading(false);
+      return;
+    }
     const fetchPros = async () => {
       setLoading(true);
       try {
@@ -233,16 +360,25 @@ function SearchResultsContent() {
           const coords = extractCoordinates(p.location);
           const hasLocation = coords !== null;
           
+          // Display company/business name if available, fallback to personal name
+          const displayName = p.businessName || p.companyName || p.fullName || 'Professional';
+          const subtitle = (p.businessName || p.companyName) && p.fullName 
+            ? p.fullName 
+            : null;
+
           return {
             id: p.id,
-            name: p.fullName || p.businessName || 'Pro',
+            name: displayName,
+            ownerName: subtitle,
             trade: p.trade || (p.trades && p.trades[0]) || 'Generalist',
             trades: p.trades || [p.trade].filter(Boolean),
             rating: p.rating || 5.0,
             reviews: p.reviewCount || 0,
-            description: p.businessName || 'Professional trade specialist registered on Fix Link.',
+            description: subtitle 
+              ? `${subtitle} • Professional trade specialist registered on Fix Link.`
+              : 'Professional trade specialist registered on Fix Link.',
             image: p.imageUrl || null,
-            featured: p.tier === 'legend',
+            featured: p.tier === 'platinum',
             location: hasLocation ? [coords.lat, coords.lng] : null,
             verified: true,
             tier: p.tier,
@@ -251,8 +387,17 @@ function SearchResultsContent() {
           };
         });
 
-        // 3. Final Deployment synchronization
-        setPros(mappedPros);
+        // 3. Final Ranking: Sort by Rating (High to Low), then by distance
+        const sortedPros = mappedPros
+          .sort((a, b) => {
+            if (b.rating !== a.rating) {
+              return b.rating - a.rating;
+            }
+            return a.distance - b.distance;
+          });
+
+        // 4. Final Deployment synchronization
+        setPros(sortedPros);
       } catch (error) {
         console.error('Search fetch failed:', error);
       } finally {
@@ -264,7 +409,16 @@ function SearchResultsContent() {
 
   // Filter specifically for markers (must have location)
   // We trust 'pros' which is already filtered by normalized trade and 70km radius in fetchPros
-  const mapMarkers = pros.filter(pro => pro.location !== null);
+  // Prepare markers for the map with normalized coordinates
+  const mapMarkers = React.useMemo(() => {
+    return pros.map(pro => {
+      const coords = extractCoordinates(pro.location || pro.address);
+      return {
+        ...pro,
+        mapCoords: coords ? [coords.lat, coords.lng] : null
+      };
+    }).filter(pro => pro.mapCoords !== null);
+  }, [pros]);
 
   const handleContact = async (pro: any) => {
     if (!user) {
@@ -281,6 +435,59 @@ function SearchResultsContent() {
       console.error("Failed to start chat:", err);
     }
   };
+
+  const handleLocationSelect = (address: string, lat: number, lng: number) => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.set('address', address);
+    params.set('lat', lat.toString());
+    params.set('lng', lng.toString());
+    router.replace(`/search?${params.toString()}`);
+  };
+
+  if (!hasLocation) {
+    return (
+      <div className="min-h-[80vh] flex flex-col items-center justify-center px-6 py-12 bg-gradient-to-br from-slate-50 to-white">
+        <motion.div 
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="max-w-2xl w-full text-center space-y-8"
+        >
+          <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center mx-auto shadow-2xl border border-slate-100">
+            <MapPin className="w-10 h-10 text-primary animate-bounce" />
+          </div>
+          
+          <div className="space-y-4">
+            <h1 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 uppercase italic">
+              Find <span className="text-primary italic tracking-normal">{selectedTrade}</span> near you
+            </h1>
+            <p className="text-xl text-slate-500 font-bold leading-relaxed">
+              Enter your address to discover top-rated professionals in your specific area.
+            </p>
+          </div>
+
+          <div className="bg-white p-8 rounded-[3rem] shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] border border-slate-100">
+            <LocationSearch 
+              onLocationSelect={handleLocationSelect}
+              placeholder="Where do you need help?"
+              className="mb-0"
+            />
+          </div>
+
+          <div className="flex flex-wrap justify-center gap-4 pt-4">
+            <div className="px-4 py-2 bg-slate-100 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Localized Discovery
+            </div>
+            <div className="px-4 py-2 bg-slate-100 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Verified Experts
+            </div>
+            <div className="px-4 py-2 bg-slate-100 rounded-full text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">
+              Direct Contact
+            </div>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-6 py-12">
@@ -299,7 +506,7 @@ function SearchResultsContent() {
                  Fleet Sync: <span className="text-primary italic">Localized Discovery active</span>
                </p>
                <p className="text-slate-500 font-bold text-[10px] uppercase tracking-widest px-3 py-1 bg-slate-100 rounded-full">
-                 Radius: <span className="text-primary italic">Strict 70km</span>
+                 Radius: <span className="text-primary italic">Strategic Radius</span>
                </p>
                <p className="text-slate-400 font-bold text-[8px] uppercase tracking-widest px-2 py-0.5 border border-slate-100 rounded-md">
                  Ver: 1.0.4-Sync
@@ -384,8 +591,8 @@ function SearchResultsContent() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-10">
-        {/* Results Sidebar / Content - 7 columns */}
-        <div className={`lg:col-span-7 space-y-6 ${activeTab === 'map' ? 'hidden' : 'block'}`}>
+        {/* Results Sidebar / Content - 12 or 7 columns depending on context */}
+        <div className={`${activeTab === 'list' ? 'lg:col-span-12' : 'lg:col-span-7'} space-y-6 ${activeTab === 'map' ? 'hidden' : 'block'}`}>
           {pros.map((pro, index) => (
             <motion.div
               initial={{ opacity: 0, y: 20 }}
@@ -420,6 +627,11 @@ function SearchResultsContent() {
                         {pro.verified && <CheckCircle2 className="w-5 h-5 text-primary" />}
                       </div>
                       <p className="text-primary font-black uppercase tracking-widest text-[10px] italic">{pro.trade}</p>
+                      {pro.ownerName && (
+                        <p className="text-slate-400 font-bold text-[10px] uppercase tracking-wider mt-1">
+                          <User className="w-3 h-3 inline-block mr-1 -mt-0.5" />{pro.ownerName}
+                        </p>
+                      )}
                     </div>
 
                   <p className="text-slate-500 text-sm leading-relaxed line-clamp-2 font-medium">
@@ -459,7 +671,7 @@ function SearchResultsContent() {
                 <h2 className="text-3xl font-black tracking-tight mb-4 italic uppercase">No Experts in Range</h2>
                 <div className="max-w-md space-y-4 mb-10">
                    <p className="text-slate-500 font-bold leading-relaxed">
-                      We strictly scan within a <span className="text-primary italic">70km radius</span> of 
+                      We strictly scan within a <span className="text-primary italic">localized radius</span> of 
                       <span className="text-slate-900 ml-1 italic">{locationParam.split(',')[0]}</span>.
                    </p>
                    <p className="text-slate-400 text-sm">
@@ -486,7 +698,8 @@ function SearchResultsContent() {
         </div>
 
         {/* Dynamic Map - 5 or 12 columns */}
-        <div className={`${activeTab === 'map' ? 'lg:col-span-12' : 'lg:col-span-5'} sticky top-32 h-[calc(100vh-140px)] ${activeTab === 'list' ? 'hidden lg:block' : 'col-span-1 block'}`}>
+        {/* Dynamic Map - 12 columns, hidden when in list mode */}
+        <div className={`${activeTab === 'map' ? 'lg:col-span-12 block' : 'hidden'} col-span-1 sticky top-32 h-[calc(100vh-140px)] transition-all duration-500`}>
           <div className="w-full h-full bg-slate-100 rounded-[3rem] border border-slate-200 overflow-hidden shadow-2xl relative transition-all duration-500">
             <div className="absolute inset-0 z-0 bg-[#e5e7eb]">
                 <MapContainer 
@@ -499,16 +712,41 @@ function SearchResultsContent() {
                     scrollWheelZoom: true,
                     touchZoom: true,
                     dragging: true,
-                    doubleClickZoom: true
+                    doubleClickZoom: true,
+                    zoomAnimation: true
                   } as any)}
                 >
+                  <MapZoomTracker />
                   <MapEffect activeTab={activeTab} markers={mapMarkers} />
                   <ZoomControl position="bottomright" />
-                  <TileLayer
-                    attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-                    url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                    {...({} as any)}
-                  />
+                  
+                  {/* Custom Satellite Toggle in Map */}
+                  <div className="absolute top-6 left-6 z-[1000] flex flex-col gap-2">
+                    <button 
+                      onClick={() => setMapMode(mapMode === 'normal' ? 'satellite' : 'normal')}
+                      className="group bg-white/90 backdrop-blur-md p-3 rounded-2xl shadow-2xl border border-white hover:scale-110 active:scale-95 transition-all duration-300 flex items-center gap-3 overflow-hidden"
+                    >
+                      <div className={`w-8 h-8 rounded-xl flex items-center justify-center transition-colors ${mapMode === 'satellite' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-500'}`}>
+                        {mapMode === 'satellite' ? <Shield className="w-4 h-4" /> : <Navigation className="w-4 h-4" />}
+                      </div>
+                      <div className="flex flex-col items-start pr-2">
+                        <span className="text-[10px] font-black uppercase tracking-widest text-slate-900 italic">View Mode</span>
+                        <span className="text-[8px] font-bold uppercase text-primary tracking-wider">{mapMode === 'satellite' ? 'Satellite' : 'Roadmap'}</span>
+                      </div>
+                    </button>
+                  </div>
+
+                  {mapMode === 'normal' ? (
+                    <TileLayer
+                      attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+                      url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                    />
+                  ) : (
+                    <TileLayer
+                      attribution='Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EBP, and the GIS User Community'
+                      url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                    />
+                  )}
                   
                    {/* Search Center Reference Marker */}
                    {latParam && lngParam && mapIcons && !isNaN(parseFloat(latParam)) && !isNaN(parseFloat(lngParam)) && (
@@ -524,77 +762,143 @@ function SearchResultsContent() {
                      </Marker>
                    )}
 
-                   {mapMarkers.map(pro => (
-                    <Marker 
-                      key={pro.id} 
-                      position={pro.location as any}
+                    <MarkerClusterGroup 
+                      chunkedLoading 
+                      maxClusterRadius={70} 
+                      spiderfyOnMaxZoom={true} 
+                      showCoverageOnHover={false}
+                      zoomToBoundsOnClick={true}
+                      animate={true}
                     >
-                      <Tooltip 
-                        permanent={true} 
-                        direction="top" 
-                        className="custom-map-tooltip"
-                      >
-                        <div className="flex flex-col items-center">
-                          <span className="text-[9px] font-black uppercase tracking-tighter text-slate-900 bg-white px-2 py-0.5 rounded shadow-sm">
-                            {pro.name}
-                          </span>
-                          <span className="text-[7px] font-black uppercase tracking-widest text-primary bg-white/90 px-1 rounded-sm mt-0.5">
-                            {pro.trade?.split(' ')[0]}
-                          </span>
-                        </div>
-                      </Tooltip>
-                      <Popup>
-                        <div className="w-[280px] bg-white rounded-[2rem] overflow-hidden -m-[1px]">
-                          {/* Pro Header Image */}
-                          <div className="h-28 w-full relative overflow-hidden bg-slate-100 flex items-center justify-center">
-                             {pro.image || pro.companyLogoUrl ? (
-                               <img 
-                                 src={pro.image || pro.companyLogoUrl} 
-                                 alt={pro.name} 
-                                 className="w-full h-full object-cover"
-                               />
-                             ) : (
-                               <User className="w-8 h-8 text-slate-300" />
-                             )}
-                             <div className="absolute top-3 right-3 px-3 py-1 bg-white/90 backdrop-blur-md rounded-lg shadow-sm flex items-center gap-1">
-                                <Star className="w-2.5 h-2.5 text-accent fill-accent" />
-                                <span className="text-[10px] font-black">{pro.rating?.toFixed(1) || '5.0'}</span>
-                             </div>
-                          </div>
-                          
-                          {/* Content */}
-                          <div className="p-5 space-y-4">
-                             <div>
-                                <h4 className="font-black text-slate-900 uppercase italic tracking-tight leading-none mb-1">{pro.name}</h4>
-                                <p className="text-[9px] font-black text-primary uppercase tracking-widest italic opacity-70">
-                                   {pro.trade || (pro.trades && pro.trades[0])}
-                                </p>
-                             </div>
+                      {mapMarkers.map(pro => (
+                        <Marker 
+                          key={pro.id} 
+                          position={pro.mapCoords as any}
+                          icon={createProIcon(pro)}
+                          eventHandlers={{
+                            mouseover: (e) => {
+                              if (closeTimeout.current) {
+                                clearTimeout(closeTimeout.current);
+                                closeTimeout.current = null;
+                              }
+                              
+                              if (pinnedMarkerId !== pro.id) {
+                                // Explicitly release any previous hover state
+                                setHoveredMarkerId(null);
+                                
+                                // Explicitly close any other open popups to ensure clean transition
+                                if (mapInstanceRef.current) {
+                                  mapInstanceRef.current.closePopup();
+                                }
+                                
+                                // Set new hover state
+                                setTimeout(() => setHoveredMarkerId(pro.id), 0);
+                                e.target.openPopup();
+                              }
+                            },
+                            mouseout: (e) => {
+                              if (pinnedMarkerId === pro.id) return;
+                              
+                              if (closeTimeout.current) clearTimeout(closeTimeout.current);
+                              
+                              // Start a 3-second grace period
+                              closeTimeout.current = setTimeout(() => {
+                                if (pinnedMarkerId !== pro.id) {
+                                  e.target.closePopup();
+                                  setHoveredMarkerId(null);
+                                }
+                              }, 3000);
+                            },
+                            click: (e) => {
+                              // Selection logic: Click pins the marker so it stays open indefinitely
+                              if (pinnedMarkerId === pro.id) {
+                                setPinnedMarkerId(null);
+                                e.target.closePopup();
+                              } else {
+                                if (closeTimeout.current) {
+                                  clearTimeout(closeTimeout.current);
+                                  closeTimeout.current = null;
+                                }
+                                setPinnedMarkerId(pro.id);
+                                setHoveredMarkerId(null); // It's now pinned, not just hovered
+                                e.target.openPopup();
+                              }
+                            }
+                          }}
+                        >
+                          <Popup closeButton={false} autoClose={true} closeOnClick={false}>
+                            <div 
+                              className="w-[280px] bg-white rounded-[2rem] overflow-hidden -m-[1px]"
+                              onMouseEnter={() => {
+                                if (closeTimeout.current) {
+                                  clearTimeout(closeTimeout.current);
+                                  closeTimeout.current = null;
+                                }
+                                setHoveredMarkerId(pro.id);
+                              }}
+                              onMouseLeave={() => {
+                                if (pinnedMarkerId !== pro.id) {
+                                  if (closeTimeout.current) clearTimeout(closeTimeout.current);
+                                  closeTimeout.current = setTimeout(() => {
+                                    setHoveredMarkerId(null);
+                                    if (mapInstanceRef.current) {
+                                      mapInstanceRef.current.closePopup();
+                                    }
+                                  }, 3000);
+                                }
+                              }}
+                            >
+                              {/* Pro Header Image */}
+                              <div className="h-28 w-full relative overflow-hidden bg-slate-100 flex items-center justify-center">
+                                 {pro.image || pro.companyLogoUrl ? (
+                                   <img 
+                                     src={pro.image || pro.companyLogoUrl} 
+                                     alt={pro.name} 
+                                     className="w-full h-full object-cover"
+                                   />
+                                 ) : (
+                                   <User className="w-8 h-8 text-slate-300" />
+                                 )}
+                                 <div className="absolute top-3 right-3 px-3 py-1 bg-white/90 backdrop-blur-md rounded-lg shadow-sm flex items-center gap-1">
+                                    <Star className="w-2.5 h-2.5 text-accent fill-accent" />
+                                    <span className="text-[10px] font-black">{pro.rating?.toFixed(1) || '5.0'}</span>
+                                 </div>
+                              </div>
+                              
+                              {/* Content */}
+                              <div className="p-5 space-y-4">
+                                 <div>
+                                    <h4 className="font-black text-slate-900 uppercase italic tracking-tight leading-none mb-1">{pro.name}</h4>
+                                    <p className="text-[9px] font-black text-primary uppercase tracking-widest italic opacity-70">
+                                       {pro.trade || (pro.trades && pro.trades[0])}
+                                    </p>
+                                 </div>
 
-                             <div className="flex items-center gap-3">
-                                <div className="flex-1 py-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
-                                   <MapPin className="w-3 h-3 text-primary" />
-                                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
-                                      {pro.distance ? `${pro.distance.toFixed(1)}km` : 'Nearby'}
-                                   </span>
-                                </div>
-                                <div className="flex-1 py-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
-                                   <ShieldCheck className="w-3 h-3 text-primary" />
-                                   <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Verified</span>
-                                </div>
-                             </div>
+                                 <div className="flex items-center gap-3">
+                                    <div className="flex-1 py-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
+                                       <MapPin className="w-3 h-3 text-primary" />
+                                       <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">
+                                          {pro.distance ? `${pro.distance.toFixed(1)}km` : 'Nearby'}
+                                       </span>
+                                    </div>
+                                    <div className="flex-1 py-3 bg-slate-50 rounded-xl border border-slate-100 flex items-center justify-center gap-2">
+                                       <ShieldCheck className="w-3 h-3 text-primary" />
+                                       <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Verified</span>
+                                    </div>
+                                 </div>
 
-                             <button 
-                               onClick={() => handleContact(pro)}
-                               className="w-full py-4 bg-primary text-white rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all text-center"
-                             >
-                                Message & Hire
-                             </button>
-                          </div>
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
+                                 <button 
+                                   onClick={() => handleContact(pro)}
+                                   className="w-full py-4 bg-primary text-white rounded-xl font-black text-[10px] uppercase tracking-[0.2em] shadow-lg shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all text-center"
+                                 >
+                                    Message & Hire
+                                 </button>
+                              </div>
+                            </div>
+                          </Popup>
+                        </Marker>
+                      ))}
+                    </MarkerClusterGroup>
                 </MapContainer>
             </div>
 
@@ -628,7 +932,7 @@ function SearchResultsContent() {
                      </div>
                   </div>
                   <p className="text-white font-bold text-xs leading-relaxed opacity-80 mb-4">
-                    Analyzing <span className="text-primary italic">70km radius</span>...
+                    Analyzing <span className="text-primary italic">localized radius</span>...
                   </p>
                   <button className="w-full py-4 bg-primary text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-primary/40 hover:scale-[1.02] active:scale-95 transition-all">
                     Refine Search Area

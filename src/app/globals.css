@@ -104,3 +104,15 @@ body {
 .premium-popup .leaflet-popup-close-button:hover {
   color: #1e4e79 !important;
 }
+
+/* Custom Map Tooltip Styling */
+.custom-map-tooltip {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.custom-map-tooltip::before {
+  display: none !important;
+}

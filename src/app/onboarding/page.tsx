@@ -16,11 +16,12 @@ import {
   ChevronLeft,
   Search
 } from 'lucide-react';
+import { TRADES, TIER_CONFIG, TierId } from '@/lib/constants';
 import { useAuth } from '@/context/AuthContext';
 import { syncUserProfile } from '@/lib/db';
-import { TRADES } from '@/lib/constants';
 import Link from 'next/link';
 import Autocomplete from "react-google-autocomplete";
+import { Zap } from 'lucide-react';
 
 
 
@@ -28,6 +29,7 @@ export default function OnboardingPage() {
   const { user, profile, loading: authLoading } = useAuth();
   const [step, setStep] = useState(1);
   const [selectedRole, setSelectedRole] = useState<'customer' | 'tradesman' | null>(null);
+  const [selectedTier, setSelectedTier] = useState<TierId>('starter');
   const [isCompany, setIsCompany] = useState<boolean>(false);
   const [selectedTrades, setSelectedTrades] = useState<string[]>([]);
   const [tradeSearch, setTradeSearch] = useState<string>('');
@@ -70,6 +72,14 @@ export default function OnboardingPage() {
       handleCompleteOnboarding();
       return;
     }
+    if (step === 5 && selectedRole === 'tradesman') {
+      setStep(6);
+      return;
+    }
+    if (step === 6) {
+      handleCompleteOnboarding();
+      return;
+    }
     setStep(s => s + 1);
   };
   const handleBack = () => {
@@ -92,13 +102,19 @@ export default function OnboardingPage() {
     setIsSubmitting(true);
     setError(null);
     try {
+      const trialDays = 14;
+      const trialExpiresAt = new Date();
+      trialExpiresAt.setDate(trialExpiresAt.getDate() + trialDays);
+
       await syncUserProfile(user.uid, {
         email: user.email || '',
         fullName: user.displayName || 'New User',
         role: selectedRole,
         isCompany: isCompany === true,
-        trade: selectedTrades[0] || undefined, // Keep single trade for backwards compatibility
-        tier: 'starter', // Default tier for new professionals
+        trade: selectedTrades[0] || undefined, 
+        tier: selectedTier,
+        tierStatus: selectedTier === 'starter' ? 'active' : 'trial',
+        tierTrialExpiresAt: selectedTier === 'starter' ? undefined : trialExpiresAt.toISOString(),
         onboardingCompleted: true,
         ...formData,
         location: coordinates ? { 
@@ -147,7 +163,7 @@ export default function OnboardingPage() {
            <motion.div 
              className="h-full bg-primary"
              initial={{ width: '0%' }}
-             animate={{ width: `${(step / (selectedRole === 'tradesman' ? 5 : 4)) * 100}%` }}
+             animate={{ width: `${(step / (selectedRole === 'tradesman' ? 6 : 4)) * 100}%` }}
            />
         </div>
 
@@ -172,7 +188,7 @@ export default function OnboardingPage() {
 
               {/* Step Headers */}
               <div>
-                <img src="/FixLinkLogo.png" alt="Fix Link" className="w-20 h-20 mx-auto mb-8 mix-blend-multiply" />
+                <img src="/FixLinkLogo.png" alt="Fix Link" className="w-24 h-24 mx-auto mb-8 mix-blend-multiply transition-transform hover:scale-110" />
                 
                 {step === 1 && (
                    <>
@@ -202,6 +218,16 @@ export default function OnboardingPage() {
                    <>
                     <h1 className="text-4xl font-black tracking-tight uppercase italic mb-4">Select <span className="text-primary">Trade</span></h1>
                     <p className="text-muted-foreground font-medium">What is your primary professional expertise?</p>
+                   </>
+                )}
+                {step === 6 && (
+                   <>
+                    <div className="flex items-center justify-center gap-2 text-primary font-black uppercase tracking-widest text-[10px] mb-4 italic">
+                      <Zap className="w-4 h-4 shadow-glow" />
+                      14-Day Free Trial Included
+                    </div>
+                    <h1 className="text-4xl font-black tracking-tight uppercase italic mb-4">Choose your <span className="text-primary">Tier</span></h1>
+                    <p className="text-muted-foreground font-medium">Unlock higher visibility and faster lead access.</p>
                    </>
                 )}
                 {error && (
@@ -315,7 +341,8 @@ export default function OnboardingPage() {
                          }
                       }}
                       options={{
-                        types: ["address"],
+                        componentRestrictions: { country: 'za' },
+                        types: ["geocode", "establishment"],
                         fields: ["address_components", "geometry", "formatted_address"]
                       }}
                       placeholder="Search Permanent Street Address..."
@@ -441,11 +468,70 @@ export default function OnboardingPage() {
                   </div>
 
                   <button 
-                    onClick={handleCompleteOnboarding}
+                    onClick={handleNext}
                     disabled={isSubmitting || selectedTrades.length === 0}
                     className="w-full bg-primary text-white p-8 rounded-2xl font-black uppercase tracking-widest text-sm shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-4"
                   >
-                    {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : "Finalize Profile"}
+                    {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : "Continue to Tier Selection"}
+                  </button>
+                </div>
+              )}
+
+              {/* Step 6: Tier Selection */}
+              {step === 6 && (
+                <div className="space-y-8 text-left">
+                  <div className="grid grid-cols-1 gap-4 overflow-y-auto max-h-[400px] pr-2 custom-scrollbar">
+                    {Object.values(TIER_CONFIG)
+                      .sort((a, b) => (a.priority || 0) - (b.priority || 0))
+                      .map((t) => (
+                      <button
+                        key={t.id}
+                        onClick={() => setSelectedTier(t.id as TierId)}
+                        className={`p-6 rounded-[2rem] border-2 text-left transition-all relative group overflow-hidden ${
+                          selectedTier === t.id 
+                          ? `border-primary bg-primary/5` 
+                          : 'border-muted hover:border-muted-foreground bg-muted/20'
+                        }`}
+                      >
+                         <div className="flex justify-between items-start relative z-10">
+                           <div>
+                             <div className="flex items-center gap-2 mb-1">
+                               <p className={`text-base font-black uppercase tracking-tight italic ${selectedTier === t.id ? `text-primary` : 'text-slate-900'}`}>{t.name}</p>
+                               {t.id === 'platinum' && <span className="px-2 py-0.5 bg-accent text-white text-[8px] font-black uppercase rounded-full tracking-widest italic">Best Value</span>}
+                               {t.id === 'gold' && <span className="px-2 py-0.5 bg-primary text-white text-[8px] font-black uppercase rounded-full tracking-widest italic">Professional</span>}
+                             </div>
+                             <div className="space-y-1">
+                               <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1.5">
+                                 <MapPin className="w-3 h-3" /> {t.radius}km Service Radius
+                               </p>
+                               <p className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1.5">
+                                 <Zap className="w-3 h-3" /> {t.delayHours === 0 ? 'Instant' : `${t.delayHours}h`} Lead Access
+                               </p>
+                             </div>
+                           </div>
+                           {selectedTier === t.id && (
+                             <div className={`w-8 h-8 rounded-full bg-primary text-white flex items-center justify-center shadow-lg shadow-primary/20`}>
+                               <CheckCircle2 className="w-5 h-5" />
+                             </div>
+                           )}
+                         </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="p-6 bg-slate-900 rounded-[2rem] text-white space-y-4">
+                    <p className="text-[10px] font-black uppercase tracking-[0.2em] text-primary italic">Hero Guarantee</p>
+                    <p className="text-xs font-medium text-slate-300 leading-relaxed italic">
+                      Your chosen tier includes a 14-day free trial. You can downgrade or cancel at any time before the trial ends.
+                    </p>
+                  </div>
+
+                  <button 
+                    onClick={handleCompleteOnboarding}
+                    disabled={isSubmitting}
+                    className="w-full bg-primary text-white p-8 rounded-2xl font-black uppercase tracking-widest text-sm shadow-2xl shadow-primary/30 hover:scale-105 active:scale-95 transition-all flex items-center justify-center gap-4"
+                  >
+                    {isSubmitting ? <Loader2 className="w-6 h-6 animate-spin" /> : "Complete Professional Profile"}
                   </button>
                 </div>
               )}

@@ -22,6 +22,7 @@ import { useAuth } from '@/context/AuthContext';
 import { getUsersByRole, UserProfile } from '@/lib/db';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { TIER_CONFIG, TierId } from '@/lib/constants';
 
 export default function AdminDashboard() {
   const { user, profile } = useAuth();
@@ -248,11 +249,11 @@ export default function AdminDashboard() {
                                  <td className="px-10 py-8">
                                     {hero.role === 'tradesman' ? (
                                        <span className={`px-4 py-2 rounded-full text-[9px] font-black uppercase tracking-widest italic border ${
-                                          hero.tier === 'legend' ? 'bg-amber-50 border-amber-100 text-amber-600' : 
-                                          hero.tier === 'missing' ? 'bg-primary/10 border-primary/20 text-primary' : 
+                                          hero.tier === 'platinum' ? 'bg-accent/10 border-accent/20 text-accent shadow-glow-sm' : 
+                                          hero.tier === 'gold' ? 'bg-primary/10 border-primary/20 text-primary' : 
                                           'bg-slate-100 border-slate-200 text-slate-400'
                                        }`}>
-                                          {hero.tier || 'Starter'} Link
+                                          {hero.tier ? TIER_CONFIG[hero.tier as TierId].name : 'The Fix Link'}
                                        </span>
                                     ) : (
                                        <span className="px-4 py-2 bg-slate-100 border border-slate-200 text-slate-400 rounded-full text-[9px] font-black uppercase tracking-widest italic">
@@ -313,11 +314,11 @@ export default function AdminDashboard() {
                                {hero.role === 'tradesman' ? (
                                   <span className={cn(
                                     "inline-block px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic border truncate max-w-full",
-                                    hero.tier === 'legend' ? 'bg-amber-50 border-amber-100 text-amber-600' : 
-                                    hero.tier === 'missing' ? 'bg-primary/10 border-primary/20 text-primary' : 
+                                    hero.tier === 'platinum' ? 'bg-accent/10 border-accent/20 text-accent shadow-glow-sm' : 
+                                    hero.tier === 'gold' ? 'bg-primary/10 border-primary/20 text-primary' : 
                                     'bg-slate-100 border-slate-200 text-slate-400'
                                   )}>
-                                     {hero.tier || 'Starter'}
+                                     {hero.tier ? TIER_CONFIG[hero.tier as TierId].name : 'The Fix Link'}
                                   </span>
                                ) : (
                                   <span className="inline-block px-3 py-1 bg-slate-100 border border-slate-200 text-slate-400 rounded-full text-[8px] font-black uppercase tracking-widest italic truncate max-w-full">

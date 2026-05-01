@@ -117,3 +117,96 @@ export async function sendAdminProNotification(proInfo: { name: string, email: s
     return { success: false };
   }
 }
+
+export async function sendMissionCompletedEmail(to: string, proName: string, jobTitle: string) {
+  const hasPassword = !!(process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq');
+  
+  if (!hasPassword) {
+    console.warn('Completion email skipped: No credentials');
+    return { success: false };
+  }
+
+  const mailOptions = {
+    from: '"Fix Link Intelligence" <fixlinksa@gmail.com>',
+    to,
+    subject: `Mission Accomplished: ${jobTitle} 🚀`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #eee; border-radius: 30px; background: #fff;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #1E4E79; text-transform: uppercase; letter-spacing: -1px; margin-bottom: 5px;">Mission Complete</h1>
+          <p style="color: #64748b; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 2px;">Fix Link Official Transmission</p>
+        </div>
+        
+        <p style="font-size: 16px; color: #334155; line-height: 1.6;">Hello,</p>
+        <p style="font-size: 16px; color: #334155; line-height: 1.6;">Professional <strong>${proName}</strong> has marked your mission <strong>"${jobTitle}"</strong> as complete.</p>
+        
+        <div style="background: #f8fafc; padding: 25px; border-radius: 20px; text-align: center; margin: 30px 0; border: 1px solid #e2e8f0;">
+          <p style="margin-bottom: 20px; font-weight: bold; color: #1E4E79;">Please take a moment to rate the service provided. Your feedback maintains our elite marketplace standards.</p>
+          <a href="${process.env.NEXT_PUBLIC_APP_URL || ''}/jobs/view" style="display: inline-block; background: #1E4E79; color: white; padding: 18px 35px; text-decoration: none; border-radius: 15px; font-weight: 900; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; box-shadow: 0 10px 20px rgba(30, 78, 121, 0.2);">Rate Professional & Close Project</a>
+        </div>
+        
+        <p style="color: #64748b; font-size: 12px; text-align: center; font-style: italic;">Thank you for using Fix Link - The Professional Choice.</p>
+        
+        <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
+          <p style="font-weight: bold; color: #1E4E79; margin-bottom: 0;">The Fix Link Team</p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Completion email sent:', info.messageId);
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to send completion email:', err);
+    return { success: false };
+  }
+}
+
+export async function sendReviewReceivedEmail(to: string, customerName: string, jobTitle: string, rating: number) {
+  const hasPassword = !!(process.env.GMAIL_APP_PASSWORD || 'kljbvpfjioscsqmq');
+  
+  if (!hasPassword) {
+    console.warn('Review email skipped: No credentials');
+    return { success: false };
+  }
+
+  const mailOptions = {
+    from: '"Fix Link Intelligence" <fixlinksa@gmail.com>',
+    to,
+    subject: `Mission Honor Awarded: "${jobTitle}" 🏆`,
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: auto; padding: 30px; border: 1px solid #eee; border-radius: 30px; background: #fff;">
+        <div style="text-align: center; margin-bottom: 30px;">
+          <h1 style="color: #1E4E79; text-transform: uppercase; letter-spacing: -1px; margin-bottom: 5px;">Honor Updated</h1>
+          <p style="color: #64748b; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 2px;">Fix Link Reputation Transmission</p>
+        </div>
+        
+        <p style="font-size: 16px; color: #334155; line-height: 1.6;">Excellent work,</p>
+        <p style="font-size: 16px; color: #334155; line-height: 1.6;">Customer <strong>${customerName}</strong> has rated your mission <strong>"${jobTitle}"</strong>.</p>
+        
+        <div style="background: #1E4E79; padding: 30px; border-radius: 20px; text-align: center; margin: 30px 0; color: white;">
+          <p style="margin-bottom: 15px; font-weight: bold; text-transform: uppercase; font-size: 12px; letter-spacing: 1px; opacity: 0.8;">Mission Rating Details</p>
+          <div style="font-size: 48px; font-weight: 900; margin-bottom: 10px;">${rating} <span style="font-size: 24px; opacity: 0.5;">/ 5.0</span></div>
+          <div style="font-size: 18px; color: #fbbf24;">${'★'.repeat(Math.floor(rating))}${rating % 1 !== 0 ? '½' : ''}${'☆'.repeat(5 - Math.ceil(rating))}</div>
+        </div>
+        
+        <p style="color: #64748b; font-size: 12px; text-align: center; font-style: italic;">This rating has been integrated into your professional profile and will uplift your market standing.</p>
+        
+        <div style="border-top: 1px solid #eee; margin-top: 40px; padding-top: 20px; text-align: center;">
+          <p style="font-weight: bold; color: #1E4E79; margin-bottom: 0;">The Fix Link Team</p>
+        </div>
+      </div>
+    `
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log('Review email sent:', info.messageId);
+    return { success: true };
+  } catch (err) {
+    console.error('Failed to send review email:', err);
+    return { success: false };
+  }
+}

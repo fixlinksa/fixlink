@@ -236,7 +236,7 @@ export default function AdminDashboardPage() {
 
               <div className="space-y-8">
                  <div>
-                    <h3 className="text-white font-black text-4xl tracking-tighter mb-2 italic uppercase">Legendary</h3>
+                    <h3 className="text-white font-black text-4xl tracking-tighter mb-2 italic uppercase">Platinum</h3>
                     <p className="text-slate-400 text-xs font-medium italic">All verification buffers operational.</p>
                  </div>
 

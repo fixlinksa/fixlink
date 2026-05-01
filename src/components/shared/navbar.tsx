@@ -33,7 +33,7 @@ export default function Navbar() {
   const navLinks = [
     { name: 'Home', href: '/' },
     { name: 'About', href: '/about' },
-    { name: 'Services', href: '/#services' },
+    { name: 'Services', href: '/services' },
     { name: 'Contact', href: '/contact' },
   ];
 
@@ -45,14 +45,14 @@ export default function Navbar() {
         <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 group">
-            <div className="w-12 h-12 flex items-center justify-center bg-white rounded-xl overflow-hidden shadow-sm">
+            <div className="w-12 h-12 flex items-center justify-center overflow-hidden">
                <img 
                  src="/FixLinkLogo.png" 
                  alt="Fix Link" 
-                 className="w-full h-full object-contain group-hover:scale-105 transition-transform mix-blend-multiply" 
+                 className="w-full h-full object-contain group-hover:scale-110 transition-transform mix-blend-multiply" 
                />
             </div>
-            <span className="font-black text-2xl tracking-tighter text-primary uppercase">Fix Link</span>
+            <span className="font-black text-2xl tracking-tighter text-primary uppercase">FixLink</span>
           </Link>
 
           {/* Desktop Nav */}

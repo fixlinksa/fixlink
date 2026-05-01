@@ -25,6 +25,9 @@ import {
   markNotificationAsRead, 
   deleteChat, 
   repairJobFinancials,
+  getUsersByRole,
+  getDistance,
+  extractCoordinates,
   db 
 } from '@/lib/db';
 import { collection, query, where, onSnapshot, orderBy, limit } from 'firebase/firestore';
@@ -37,6 +40,7 @@ export default function CustomerDashboard() {
   const [quotes, setQuotes] = useState<any[]>([]);
   const [chats, setChats] = useState<any[]>([]);
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [prosNearbyCount, setProsNearbyCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
 
@@ -125,6 +129,33 @@ export default function CustomerDashboard() {
     return () => unsubscribeJobs();
   }, [user]);
 
+  // Mission Reach Calculation (70km Rule)
+  useEffect(() => {
+    async function calculateProsNearby() {
+      if (!profile?.location) return;
+      
+      try {
+        const userCoords = extractCoordinates(profile.location);
+        if (!userCoords) return;
+
+        const allPros = await getUsersByRole('tradesman');
+        const nearby = allPros.filter(pro => {
+          if (!pro.location || pro.isAvailable === false) return false;
+          const proCoords = extractCoordinates(pro.location);
+          if (!proCoords) return false;
+          const dist = getDistance(userCoords.lat, userCoords.lng, proCoords.lat, proCoords.lng);
+          return dist <= 70; // Hard 70km Protocol
+        });
+
+        setProsNearbyCount(nearby.length);
+      } catch (err) {
+        console.error("MISSION REACH CALCULATION FAILURE:", err);
+      }
+    }
+
+    calculateProsNearby();
+  }, [profile]);
+
   const unreadCount = notifications.filter(n => !n.read).length;
 
   const handleAlertClick = async (notif: any) => {
@@ -160,6 +191,7 @@ export default function CustomerDashboard() {
 
   const activeJobsCount = jobs.filter(j => j.status !== 'completed' && j.status !== 'cancelled').length;
   const totalQuotesCount = quotes.length;
+  const totalSpent = jobs.reduce((acc, job) => acc + (job.amountPaid || 0), 0);
 
   return (
     <div className="flex flex-col gap-10 py-8 max-w-2xl mx-auto md:max-w-none">
@@ -229,8 +261,8 @@ export default function CustomerDashboard() {
           {[
             { label: 'Active Jobs', val: activeJobsCount.toString(), icon: Navigation, color: 'text-blue-500', bg: 'bg-blue-50' },
             { label: 'Total Quotes', val: totalQuotesCount.toString(), icon: MessageSquare, color: 'text-orange-500', bg: 'bg-orange-50' },
-            { label: 'Pros Nearby', val: '124', icon: Zap, color: 'text-yellow-500', bg: 'bg-yellow-50' },
-            { label: 'Spent', val: 'R0', icon: ShieldCheck, color: 'text-green-500', bg: 'bg-green-50' },
+            { label: 'Pros Nearby', val: prosNearbyCount.toString(), icon: Zap, color: 'text-yellow-500', bg: 'bg-yellow-50' },
+            { label: 'Spent', val: `R${totalSpent.toLocaleString()}`, icon: ShieldCheck, color: 'text-green-500', bg: 'bg-green-50' },
           ].map((stat, i) => (
            <div key={i} className="p-8 bg-white rounded-[2.5rem] border border-border shadow-sm flex items-center gap-6 group hover:border-primary/20 transition-all">
                <div className={cn("w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform", stat.bg)}>
@@ -361,6 +393,14 @@ export default function CustomerDashboard() {
                               )}>
                                  {job.status}
                               </span>
+                              {(job.amount || job.total) > 0 && (
+                                <span className={cn(
+                                   "px-5 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border",
+                                   job.isPaid ? "bg-green-50 text-green-600 border-green-100" : "bg-orange-50 text-orange-600 border-orange-100"
+                                )}>
+                                   {job.isPaid ? 'PAID' : 'PAYMENT DUE'}
+                                </span>
+                              )}
                            </div>
                         </div>
                       ))}
@@ -469,11 +509,11 @@ export default function CustomerDashboard() {
                            <div className="flex items-center justify-between mb-8">
                               <div className="flex items-center gap-6">
                                  <div className="w-16 h-16 rounded-3xl bg-accent/10 flex items-center justify-center text-accent text-3xl font-black italic text-center">
-                                    {quote.tradesmanName?.charAt(0) || 'P'}
+                                    {(quote.tradesmanBusinessName || quote.tradesmanName || 'P').charAt(0)}
                                  </div>
                                  <div>
                                     <div className="flex items-center gap-3">
-                                       <h4 className="font-black text-xl italic uppercase tracking-tighter">{quote.tradesmanName || 'Pro'}</h4>
+                                       <h4 className="font-black text-xl italic uppercase tracking-tighter">{quote.tradesmanBusinessName || quote.tradesmanName || 'Pro'}</h4>
                                        <ShieldCheck className="w-5 h-5 text-blue-500 fill-blue-50" />
                                     </div>
                                     <div className="flex items-center text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] italic">

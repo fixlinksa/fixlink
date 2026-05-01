@@ -44,7 +44,8 @@ export default function LeadsPage() {
         proLat: profile?.location?.lat,
         proLng: profile?.location?.lng,
         radiusKm: radius,
-        category: filterTrade ? profile?.trades || profile?.trade : undefined
+        category: filterTrade ? profile?.trades || profile?.trade : undefined,
+        proTier: profile?.tier as any
       });
       setLeads(data);
     } catch (error) {
@@ -155,7 +156,7 @@ export default function LeadsPage() {
               exit={{ opacity: 0, scale: 0.95 }}
               transition={{ delay: index * 0.05 }}
                className="group bg-white p-8 rounded-[2.5rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:border-accent/20 transition-all flex flex-col md:flex-row items-start md:items-center gap-8 relative overflow-hidden cursor-pointer"
-               onClick={() => router.push(`/jobs/view?id=${lead.jobId}`)}
+               onClick={() => router.push(`/jobs/view?id=${lead.jobId || lead.id}`)}
             >
               {/* Highlight bar for trade matches */}
               {profile?.trades?.includes(lead.category) && (

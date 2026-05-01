@@ -116,8 +116,8 @@ export default function SignupPage() {
         <div className="relative text-center space-y-12">
           {/* Header */}
           <div className="space-y-4">
-            <Link href="/" className="inline-block">
-               <img src="/FixLinkLogo.png" alt="Fix Link" className="w-20 h-20 mx-auto mix-blend-multiply hover:scale-105 transition-transform" />
+            <Link href="/" className="inline-block transition-transform hover:scale-110">
+               <img src="/FixLinkLogo.png" alt="Fix Link" className="w-24 h-24 mx-auto mix-blend-multiply" />
             </Link>
             <h1 className="text-4xl font-black tracking-tight uppercase italic text-foreground">Join the <span className="text-primary">Marketplace</span></h1>
             <p className="text-muted-foreground font-medium max-w-sm mx-auto">Create your professional profile and start hire or providing services today.</p>

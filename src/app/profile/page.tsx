@@ -37,6 +37,11 @@ export default function ProfilePage() {
     address: '',
     location: { lat: 0, lng: 0 } as any,
     mutedNotifications: false,
+    bankName: '',
+    accountHolder: '',
+    accountNumber: '',
+    branchCode: '',
+    phone: '',
   });
   const [updateLoading, setUpdateLoading] = React.useState(false);
   const [imageError, setImageError] = React.useState<string | null>(null);
@@ -54,6 +59,11 @@ export default function ProfilePage() {
         address: profile.address || '',
         location: profile.location || { lat: -33.9249, lng: 18.4241 },
         mutedNotifications: profile.mutedNotifications || false,
+        bankName: profile.bankName || '',
+        accountHolder: profile.accountHolder || '',
+        accountNumber: profile.accountNumber || '',
+        branchCode: profile.branchCode || '',
+        phone: profile.phone || profile.contactPhone || '',
       });
     }
   }, [profile]);
@@ -87,6 +97,7 @@ export default function ProfilePage() {
         companyName: formData.businessName,
         address: formData.address,
         location: formData.location,
+        contactPhone: formData.phone,
       });
       setIsEditing(false);
       window.location.reload(); // Refresh to show new data
@@ -206,15 +217,27 @@ export default function ProfilePage() {
                           className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all placeholder:text-slate-300"
                        />
                     </div>
-                    <div className="space-y-2">
-                       <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Digital Domain (Website)</label>
-                       <input 
-                          type="text"
-                          value={formData.website}
-                          onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                          placeholder="https://yourwebsite.com"
-                          className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all placeholder:text-slate-300"
-                       />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Digital Domain (Website)</label>
+                        <input 
+                            type="text"
+                            value={formData.website}
+                            onChange={(e) => setFormData({ ...formData, website: e.target.value })}
+                            placeholder="https://yourwebsite.com"
+                            className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all placeholder:text-slate-300"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Contact Phone (For Invoices)</label>
+                        <input 
+                            type="text"
+                            value={formData.phone}
+                            onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
+                            placeholder="+27 82 123 4567"
+                            className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all placeholder:text-slate-300"
+                        />
+                      </div>
                     </div>
                  </div>
               </div>
@@ -258,6 +281,59 @@ export default function ProfilePage() {
                         }}
                       />
                    </label>
+                </div>
+             </div>
+           )}
+
+           {/* Banking Details Section */}
+           {role !== 'customer' && (
+             <div className="mt-10 pt-10 border-t border-slate-50 space-y-6">
+                <div>
+                  <h4 className="text-[10px] font-black uppercase tracking-widest text-slate-900 mb-1 italic">Invoicing & Banking Intelligence</h4>
+                  <p className="text-xs font-bold text-slate-400">Specify your banking details to be included automatically on all customer invoices.</p>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Bank Name</label>
+                      <input 
+                         type="text"
+                         value={formData.bankName}
+                         onChange={(e) => setFormData({ ...formData, bankName: e.target.value })}
+                         placeholder="e.g. First National Bank"
+                         className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all"
+                      />
+                   </div>
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Account Holder</label>
+                      <input 
+                         type="text"
+                         value={formData.accountHolder}
+                         onChange={(e) => setFormData({ ...formData, accountHolder: e.target.value })}
+                         placeholder="e.g. Acme Services (PTY) LTD"
+                         className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all"
+                      />
+                   </div>
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Account Number</label>
+                      <input 
+                         type="text"
+                         value={formData.accountNumber}
+                         onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
+                         placeholder="e.g. 62123456789"
+                         className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all"
+                      />
+                   </div>
+                   <div className="space-y-2">
+                      <label className="text-[10px] font-black uppercase tracking-widest text-slate-400 ml-2 italic">Branch Code</label>
+                      <input 
+                         type="text"
+                         value={formData.branchCode}
+                         onChange={(e) => setFormData({ ...formData, branchCode: e.target.value })}
+                         placeholder="e.g. 250655"
+                         className="w-full px-6 py-5 rounded-[1.5rem] bg-slate-50 border border-slate-100 focus:border-primary focus:bg-white focus:shadow-sm outline-none text-sm font-bold transition-all"
+                      />
+                   </div>
                 </div>
              </div>
            )}

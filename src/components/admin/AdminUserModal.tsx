@@ -204,7 +204,7 @@ export default function AdminUserModal({ user, isOpen, onClose, onUpdate }: Admi
                        </div>
                        <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-6 italic">Tier Elevation</p>
                        <div className="grid grid-cols-2 gap-3">
-                          {(['starter', 'missing', 'legend'] as TierId[]).map(t => (
+                          {(['starter', 'gold', 'platinum'] as TierId[]).map(t => (
                             <button
                               key={t}
                               onClick={() => handleTierChange(t)}
@@ -215,7 +215,7 @@ export default function AdminUserModal({ user, isOpen, onClose, onUpdate }: Admi
                                 : 'bg-white/5 border-white/10 text-slate-400 hover:border-primary hover:text-primary'
                               } disabled:opacity-50`}
                             >
-                              {t}
+                              {TIER_CONFIG[t].name}
                             </button>
                           ))}
                        </div>

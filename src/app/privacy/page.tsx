@@ -40,7 +40,7 @@ export default function PrivacyPage() {
             We take data security seriously and implement industry-standard measures to protect your personal details. Our use of Firebase and Clerk ensures that your authentication data and database entries are encrypted at rest and in transit.
           </p>
           <p>
-            If you have any questions or concern regarding this policy, please contact us at privacy@fixlink.co.za.
+            If you have any questions or concern regarding this policy, please contact us at info@fixlink.org.za.
           </p>
         </div>
       </div>

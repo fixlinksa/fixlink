@@ -1,88 +1,91 @@
+'use client';
+
 import React from 'react';
-import { Mail, Phone, MapPin, Send, MessageSquare } from 'lucide-react';
+import { Mail, Shield, Globe, ArrowRight } from 'lucide-react';
+import Link from 'next/link';
 
 export default function ContactPage() {
   return (
-    <div className="max-w-6xl mx-auto px-6 py-16 md:py-32 grid grid-cols-1 lg:grid-cols-2 gap-16 items-start">
-      {/* Info Column */}
-      <div className="space-y-12">
-        <div className="space-y-6">
-          <h1 className="text-5xl font-black text-primary tracking-tight">
-            Get in <span className="text-accent">Touch</span>.
+    <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      {/* Decorative Background Elements */}
+      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -right-[10%] w-[40%] h-[40%] rounded-full bg-orange-100/50 blur-3xl animate-pulse"></div>
+        <div className="absolute -bottom-[10%] -left-[10%] w-[40%] h-[40%] rounded-full bg-blue-100/50 blur-3xl animate-pulse" style={{ animationDelay: '2s' }}></div>
+      </div>
+
+      <div className="w-full max-w-2xl relative z-10">
+        {/* Header Section */}
+        <div className="text-center mb-12">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-white shadow-xl shadow-blue-500/10 mb-6 group hover:scale-105 transition-transform duration-500">
+            <Mail className="w-10 h-10 text-[#1E4E79] group-hover:rotate-12 transition-transform duration-500" />
+          </div>
+          <h1 className="text-5xl font-black text-[#1E4E79] tracking-tight mb-4">
+            Get in <span className="text-[#F7931E]">Touch</span>
           </h1>
-          <p className="text-xl text-muted-foreground font-medium max-w-md leading-relaxed">
-            Have a question? Our support team is here to help you get the most out of Fix Link.
+          <p className="text-slate-500 text-lg font-medium max-w-md mx-auto leading-relaxed">
+            Have a question or need assistance? Our team is dedicated to providing you with elite support for all your maintenance needs.
           </p>
         </div>
 
-        <div className="space-y-8">
-          {[
-            { icon: Mail, title: 'Email Us', info: 'support@fixlink.co.za', sub: 'We reply within 2 hours.' },
-            { icon: Phone, title: 'Call Support', info: '+27 21 555 0123', sub: 'Mon-Fri, 8am - 6pm' },
-            { icon: MapPin, title: 'Our Office', info: 'Cape Town, South Africa', sub: 'Tech Hub, Waterfront' },
-          ].map((item, i) => (
-            <div key={i} className="flex items-center gap-6 group cursor-pointer hover:translate-x-2 transition-all">
-              <div className="w-16 h-16 rounded-2xl bg-primary/5 flex items-center justify-center text-primary group-hover:bg-primary group-hover:text-white transition-all">
-                 <item.icon className="w-6 h-6" />
-              </div>
-              <div>
-                 <h3 className="text-sm font-black text-muted-foreground uppercase tracking-widest mb-1">{item.title}</h3>
-                 <p className="text-xl font-bold">{item.info}</p>
-                 <p className="text-sm text-muted-foreground font-medium">{item.sub}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <div className="p-8 rounded-[2.5rem] bg-accent/5 border border-accent/10 flex items-center gap-6">
-           <div className="w-12 h-12 rounded-xl bg-accent text-white flex items-center justify-center">
-             <MessageSquare className="w-6 h-6" />
-           </div>
-           <p className="text-sm font-bold text-accent italic">
-              "Professional support that actually listens. Experience the Fix Link difference."
-           </p>
-        </div>
-      </div>
-
-      {/* Form Column */}
-      <div className="p-10 md:p-14 rounded-[3.5rem] bg-white border border-border shadow-2xl shadow-primary/5 space-y-10">
-        <div className="space-y-2">
-          <h2 className="text-3xl font-black">Send a Message</h2>
-          <p className="text-muted-foreground font-medium">Briefly describe your request below.</p>
-        </div>
-
-        <form className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="space-y-2">
-               <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Your Name</label>
-               <input type="text" placeholder="John Doe" className="w-full p-4 rounded-2xl bg-muted/30 border border-transparent focus:border-primary focus:bg-white focus:outline-none transition-all font-medium" />
-            </div>
-            <div className="space-y-2">
-               <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Email Address</label>
-               <input type="email" placeholder="john@example.com" className="w-full p-4 rounded-2xl bg-muted/30 border border-transparent focus:border-primary focus:bg-white focus:outline-none transition-all font-medium" />
-            </div>
-          </div>
+        {/* Contact Card */}
+        <div className="bg-white rounded-[2.5rem] p-10 shadow-2xl shadow-slate-200/60 border border-slate-100 relative group overflow-hidden">
+          {/* Card Inner Glow */}
+          <div className="absolute inset-0 bg-gradient-to-br from-white via-white to-slate-50 opacity-0 group-hover:opacity-100 transition-opacity duration-700"></div>
           
-          <div className="space-y-2">
-             <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Subject</label>
-             <select className="w-full p-4 rounded-2xl bg-muted/30 border border-transparent focus:border-primary focus:bg-white focus:outline-none transition-all font-medium appearance-none">
-                <option>General Inquiry</option>
-                <option>Technical Support</option>
-                <option>Billing Question</option>
-                <option>Partner Request</option>
-             </select>
-          </div>
+          <div className="relative z-10">
+            <div className="flex flex-col items-center text-center">
+              <div className="text-xs font-black uppercase tracking-[0.3em] text-[#F7931E] mb-6">
+                Direct Communication
+              </div>
+              
+              <a 
+                href="mailto:info@fixlink.org.za" 
+                className="group/email relative"
+              >
+                <span className="text-3xl md:text-4xl font-black text-[#1E4E79] transition-all duration-300 group-hover/email:text-[#F7931E]">
+                  info@fixlink.org.za
+                </span>
+                <div className="h-1.5 w-0 bg-[#F7931E] mx-auto rounded-full mt-2 group-hover/email:w-full transition-all duration-500"></div>
+              </a>
 
-          <div className="space-y-2">
-             <label className="text-xs font-black uppercase tracking-widest text-muted-foreground ml-1">Your Message</label>
-             <textarea rows={4} placeholder="How can we help?" className="w-full p-4 rounded-2xl bg-muted/30 border border-transparent focus:border-primary focus:bg-white focus:outline-none transition-all font-medium resize-none"></textarea>
-          </div>
+              <p className="mt-8 text-slate-400 font-bold uppercase tracking-widest text-[10px]">
+                Response Time: Within 24 Hours
+              </p>
+            </div>
 
-          <button type="button" className="w-full py-5 bg-primary text-white rounded-2xl font-black shadow-xl shadow-primary/20 flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all">
-             Send Now
-             <Send className="w-5 h-5" />
-          </button>
-        </form>
+            <div className="grid grid-cols-2 gap-4 mt-12 pt-10 border-t border-slate-100">
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50/50">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm">
+                  <Shield className="w-5 h-5 text-[#1E4E79]" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Security</p>
+                  <p className="text-sm font-bold text-[#1E4E79]">Verified Experts</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 p-4 rounded-2xl bg-slate-50/50">
+                <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-sm">
+                  <Globe className="w-5 h-5 text-[#F7931E]" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-wider">Support</p>
+                  <p className="text-sm font-bold text-[#1E4E79]">Nationwide</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer Link */}
+        <div className="mt-12 text-center">
+          <Link 
+            href="/" 
+            className="inline-flex items-center gap-2 text-slate-400 hover:text-[#1E4E79] font-bold text-sm transition-colors duration-300 group"
+          >
+            Back to Marketplace
+            <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+          </Link>
+        </div>
       </div>
     </div>
   );

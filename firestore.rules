@@ -10,7 +10,6 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      // Allow professionals to be discovered publicly (Search Page)
       allow get: if resource.data.role == 'tradesman' || (
         request.auth != null && (
           request.auth.uid == userId || 
@@ -33,15 +32,27 @@ service cloud.firestore {
         resource.data.customerId == request.auth.uid || 
         resource.data.tradesmanId == request.auth.uid || 
         resource.data.status == 'pending' ||
+        resource.data.status == 'lead' ||
+        resource.data.status == 'available' ||
+        resource.data.status == 'open' ||
+        resource.data.status == 'estimated' ||
+        resource.data.status == 'quoted' ||
+        resource.data.status == 'declined' ||
         isAdmin()
       );
       allow create: if request.auth != null;
       allow update: if request.auth != null && (
         resource.data.customerId == request.auth.uid || 
         resource.data.tradesmanId == request.auth.uid || 
-        (resource.data.status == 'pending' && (
+        ((resource.data.status == 'pending' || resource.data.status == 'lead' || resource.data.status == 'available' || resource.data.status == 'open' || resource.data.status == 'estimated' || resource.data.status == 'quoted' || resource.data.status == 'declined') && (
           request.resource.data.tradesmanId == request.auth.uid ||
-          request.resource.data.status == 'active'
+          request.resource.data.status == 'active' ||
+          request.resource.data.status == 'billed' ||
+          request.resource.data.status == 'secured' ||
+          request.resource.data.status == 'quoted' ||
+          request.resource.data.status == 'declined' ||
+          request.resource.data.status == 'cancelled' ||
+          (resource.data.customerId == null && request.resource.data.customerId == request.auth.uid)
         )) ||
         isAdmin()
       );
@@ -52,12 +63,17 @@ service cloud.firestore {
           resource.data.customerId == request.auth.uid ||
           resource.data.tradesmanId == request.auth.uid ||
           get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId == request.auth.uid ||
-          get(/databases/$(database)/documents/jobs/$(jobId)).data.tradesmanId == request.auth.uid ||
           isAdmin()
         );
-        allow write: if request.auth != null && (
+        allow create: if request.auth != null && 
+          request.resource.data.tradesmanId == request.auth.uid;
+        allow update: if request.auth != null && (
           resource.data.tradesmanId == request.auth.uid ||
-          get(/databases/$(database)/documents/jobs/$(jobId)).data.tradesmanId == request.auth.uid ||
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId == request.auth.uid ||
+          isAdmin()
+        );
+        allow delete: if request.auth != null && (
+          resource.data.tradesmanId == request.auth.uid ||
           isAdmin()
         );
       }
@@ -70,7 +86,11 @@ service cloud.firestore {
           get(/databases/$(database)/documents/jobs/$(jobId)).data.tradesmanId == request.auth.uid ||
           isAdmin()
         );
-        allow write: if request.auth != null && (
+        allow create: if request.auth != null && (
+          request.resource.data.tradesmanId == request.auth.uid ||
+          isAdmin()
+        );
+        allow update, delete: if request.auth != null && (
           resource.data.tradesmanId == request.auth.uid ||
           isAdmin()
         );

@@ -93,7 +93,7 @@ export default function AdminProfessionalsPage() {
            />
         </div>
         <div className="flex gap-2 overflow-x-auto pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 no-scrollbar">
-           {(['all', 'starter', 'missing', 'legend'] as const).map((tier) => (
+           {(['all', 'starter', 'gold', 'platinum'] as const).map((tier) => (
              <button
                key={tier}
                onClick={() => setSelectedTier(tier)}
@@ -103,7 +103,7 @@ export default function AdminProfessionalsPage() {
                  : 'bg-white border-slate-100 text-slate-400 hover:border-primary hover:text-primary'
                }`}
              >
-               {tier}
+               {tier === 'all' ? 'All Tiers' : TIER_CONFIG[tier as TierId].name}
              </button>
            ))}
         </div>
@@ -178,12 +178,13 @@ export default function AdminProfessionalsPage() {
                         </td>
                         <td className="px-10 py-8">
                            <div className="flex items-center gap-4">
-                              <div className={`px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all ${
-                                pro.tier === 'legend' ? 'bg-accent/10 border-accent text-accent' :
-                                pro.tier === 'missing' ? 'bg-primary/10 border-primary text-primary' :
+                              <div className={cn(
+                                "px-4 py-2 rounded-xl text-[9px] font-black uppercase tracking-widest border transition-all",
+                                pro.tier === 'platinum' ? 'bg-accent/10 border-accent text-accent shadow-glow-sm' :
+                                pro.tier === 'gold' ? 'bg-primary/10 border-primary text-primary' :
                                 'bg-slate-100 border-slate-200 text-slate-400'
-                              }`}>
-                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'Link Starter'}
+                              )}>
+                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'The Fix Link'}
                               </div>
                            </div>
                         </td>
@@ -257,11 +258,11 @@ export default function AdminProfessionalsPage() {
                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-1 italic truncate">Current Tier</p>
                              <span className={cn(
                                "inline-block px-3 py-1 rounded-full text-[8px] font-black uppercase tracking-widest italic border truncate max-w-full",
-                               pro.tier === 'legend' ? 'bg-accent/10 border-accent text-accent' :
-                               pro.tier === 'missing' ? 'bg-primary/10 border-primary text-primary' :
+                               pro.tier === 'platinum' ? 'bg-accent/10 border-accent text-accent shadow-glow-sm' :
+                               pro.tier === 'gold' ? 'bg-primary/10 border-primary text-primary' :
                                'bg-slate-100 border-slate-200 text-slate-400'
                              )}>
-                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'Starter'}
+                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'The Fix Link'}
                              </span>
                           </div>
                        </div>

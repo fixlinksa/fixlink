@@ -44,7 +44,7 @@ function EditJobContent() {
         return;
       }
       if (data.status !== 'pending') {
-        alert("This mission is active and cannot be edited.");
+        alert("This job is active and cannot be edited.");
         router.push(`/jobs/view?id=${id}`);
         return;
       }
@@ -140,7 +140,7 @@ function EditJobContent() {
         <button onClick={() => router.back()} className="p-4 rounded-2xl bg-white border border-border shadow-sm">
           <ArrowLeft className="w-5 h-5 text-slate-400" />
         </button>
-        <h1 className="text-xl font-black uppercase italic tracking-tighter">Edit <span className="text-primary">Mission</span></h1>
+        <h1 className="text-xl font-black uppercase italic tracking-tighter">Edit <span className="text-primary">Job</span></h1>
         <div className="w-11" />
       </header>
 
@@ -157,7 +157,7 @@ function EditJobContent() {
            </div>
 
            <div className="space-y-2">
-              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 italic">Mission Title</label>
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 italic">Job Title</label>
               <input 
                 type="text"
                 value={formData.title}
@@ -228,7 +228,7 @@ function EditJobContent() {
         </button>
 
         <p className="text-center text-[9px] font-black uppercase text-slate-400 tracking-widest italic pb-12">
-          Note: Edits are locked once a professional accepts the mission.
+          Note: Edits are locked once a professional accepts the job.
         </p>
       </main>
     </div>

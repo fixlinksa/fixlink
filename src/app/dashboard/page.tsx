@@ -11,19 +11,23 @@ export default function DashboardRedirect() {
 
   useEffect(() => {
     if (!loading) {
+      const searchParams = new URLSearchParams(window.location.search);
+      const paramsString = searchParams.toString();
+      const suffix = paramsString ? `?${paramsString}` : '';
+
       if (!user) {
-        router.push('/login');
+        router.push(`/login${suffix}`);
       } else if (profile) {
         if (profile.role === 'admin') {
-          router.push('/admin/dashboard');
-        } else if (profile.role === 'tradesman') {
-          router.push('/dashboard/tradesman');
+          router.push(`/admin/dashboard${suffix}`);
+        } else if (profile.role === 'tradesman' || profile.role === 'professional' || profile.role === 'pro') {
+          router.push(`/dashboard/tradesman${suffix}`);
         } else {
-          router.push('/dashboard/customer');
+          router.push(`/dashboard/customer${suffix}`);
         }
       } else {
         // Logged in but no profile - send to onboarding
-        router.push('/onboarding');
+        router.push(`/onboarding${suffix}`);
       }
     }
   }, [user, profile, loading, router]);

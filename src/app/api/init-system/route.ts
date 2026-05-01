@@ -3,7 +3,7 @@ import { adminDb, adminAuth } from '@/lib/firebase-admin';
 
 export async function GET(req: NextRequest) {
   try {
-    const adminEmail = 'admin@fixlink.co.za';
+    const adminEmail = 'admin@fixlink.org.za';
     const adminPassword = 'Sharne2010!';
     const adminDisplayName = 'Admin';
 

@@ -50,7 +50,7 @@ export default function LoginPage() {
     // Admin Alias Logic
     let loginEmail = email;
     if (email.toLowerCase() === 'admin') {
-      loginEmail = 'admin@fixlink.co.za';
+      loginEmail = 'admin@fixlink.org.za';
     }
 
     try {
@@ -90,8 +90,8 @@ export default function LoginPage() {
 
         <div className="relative text-center space-y-8">
           <div className="space-y-4">
-            <Link href="/" className="inline-block">
-               <img src="/FixLinkLogo.png" alt="Fix Link" className="w-20 h-20 mx-auto mix-blend-multiply transition-transform hover:scale-105" />
+            <Link href="/" className="inline-block transition-transform hover:scale-110">
+               <img src="/FixLinkLogo.png" alt="Fix Link" className="w-24 h-24 mx-auto mix-blend-multiply" />
             </Link>
             <h1 className="text-4xl font-black tracking-tight uppercase italic text-foreground">Welcome <span className="text-primary">Back</span></h1>
             <p className="text-muted-foreground font-medium">Log in to manage your Fix Link marketplace account.</p>

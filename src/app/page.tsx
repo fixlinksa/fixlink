@@ -16,7 +16,9 @@ import {
   ClipboardCheck, 
   TrendingUp,
   MapPin,
-  CheckCircle2
+  CheckCircle2,
+  Loader2,
+  Sparkles
 } from 'lucide-react';
 import LocationSearch from '@/components/jobs/LocationSearch';
 
@@ -31,17 +33,47 @@ export default function LandingPage() {
   const { user, loading } = useAuth();
   const router = useRouter();
   const [searchLocation, setSearchLocation] = React.useState<{address: string, lat: number, lng: number} | null>(null);
+  const [problemDescription, setProblemDescription] = React.useState('');
+  const [isDiagnosing, setIsDiagnosing] = React.useState(false);
 
-  const handleSearch = (category?: string) => {
+  const handleSearch = async (category?: string) => {
     if (!searchLocation) {
+      if (category) {
+        router.push(`/search?category=${encodeURIComponent(category)}`);
+        return;
+      }
       alert("Please select a location first!");
       return;
     }
+    
+    let finalCategory = category;
+
+    if (!finalCategory && problemDescription) {
+       setIsDiagnosing(true);
+       try {
+          const res = await fetch('/api/ai/diagnose', {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ description: problemDescription })
+          });
+          if (res.ok) {
+             const data = await res.json();
+             if (data.suggestedTrades && data.suggestedTrades.length > 0) {
+                finalCategory = data.suggestedTrades[0];
+             }
+          }
+       } catch (err) {
+          console.error("AI diagnosis failed", err);
+       } finally {
+          setIsDiagnosing(false);
+       }
+    }
+
     const query = new URLSearchParams({
       lat: searchLocation.lat.toString(),
       lng: searchLocation.lng.toString(),
       address: searchLocation.address,
-      ...(category && { category })
+      ...(finalCategory && { category: finalCategory })
     }).toString();
     
     router.push(`/search?${query}`);
@@ -84,11 +116,28 @@ export default function LandingPage() {
                  placeholder="Where do you need help?"
                  className="shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] rounded-[2rem] border-none py-2"
                />
+               <textarea 
+                 value={problemDescription}
+                 onChange={(e) => setProblemDescription(e.target.value)}
+                 placeholder="Describe your problem (e.g. My tap is leaking violently)"
+                 className="w-full bg-white shadow-[0_30px_60px_-15px_rgba(0,0,0,0.1)] rounded-[2rem] p-6 text-sm font-bold resize-none outline-none focus:border-primary border border-transparent transition-all h-28"
+               />
                <button 
                  onClick={() => handleSearch()}
-                 className="w-full py-6 bg-primary text-white rounded-[1.5rem] font-black italic uppercase tracking-widest text-xs shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all"
+                 disabled={isDiagnosing}
+                 className="w-full py-6 bg-primary text-white rounded-[1.5rem] font-black italic uppercase tracking-widest text-xs shadow-xl shadow-primary/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 disabled:opacity-70 disabled:scale-100"
                >
-                 Search Professionals
+                 {isDiagnosing ? (
+                   <>
+                     <Loader2 className="w-5 h-5 animate-spin" />
+                     FixLink AI Diagnosing...
+                   </>
+                 ) : (
+                   <>
+                     <Sparkles className="w-5 h-5" />
+                     Search Professionals
+                   </>
+                 )}
                </button>
             </div>
 
@@ -124,7 +173,7 @@ export default function LandingPage() {
                 {/* Simulated App Header in Phone */}
                 <div className="absolute top-0 inset-x-0 p-4 bg-white/80 backdrop-blur-md flex items-center justify-between border-b border-slate-100">
                   <div className="flex items-center gap-2">
-                    <div className="w-6 h-6 bg-white rounded-md flex items-center justify-center overflow-hidden">
+                    <div className="w-6 h-6 flex items-center justify-center overflow-hidden">
                       <img src="/FixLinkLogo.png" alt="Logo" className="w-full h-full object-contain mix-blend-multiply" />
                     </div>
                     <span className="text-[8px] font-black text-primary italic uppercase">FIX LINK</span>
@@ -175,7 +224,7 @@ export default function LandingPage() {
             <h2 className="text-4xl md:text-5xl font-black mb-6 uppercase tracking-tight">Need something fixed?</h2>
             <p className="text-xl text-muted-foreground font-medium">Select a category to receive instant quotes from top-rated professionals in your area.</p>
           </div>
-          <Link href="/signup" className="text-primary font-black flex items-center gap-2 group">
+          <Link href="/services" className="text-primary font-black flex items-center gap-2 group">
              View all services <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
           </Link>
         </div>
@@ -241,7 +290,7 @@ export default function LandingPage() {
                       <div className="flex items-center gap-3 mb-10">
                          <div className="w-12 h-12 rounded-2xl bg-primary flex items-center justify-center text-white font-black">FL</div>
                          <div>
-                            <p className="text-sm font-black uppercase tracking-tight">Fix Link Support</p>
+                            <p className="text-sm font-black uppercase tracking-tight">FixLink Support</p>
                             <p className="text-xs text-green-500 font-bold flex items-center gap-1">
                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> Active Now
                             </p>
@@ -279,14 +328,14 @@ export default function LandingPage() {
          <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-16 items-start">
             <div className="space-y-6">
                <Link href="/" className="flex items-center gap-3 group">
-                  <div className="w-12 h-12 flex items-center justify-center overflow-hidden bg-white rounded-xl">
+                  <div className="w-12 h-12 flex items-center justify-center overflow-hidden">
                      <img 
                        src="/FixLinkLogo.png" 
                        alt="Fix Link" 
                        className="w-full h-full object-contain group-hover:scale-105 transition-transform mix-blend-multiply" 
                      />
                   </div>
-                  <span className="font-black text-2xl tracking-tighter text-primary uppercase">Fix Link</span>
+                  <span className="font-black text-2xl tracking-tighter text-primary uppercase">FixLink</span>
                </Link>
                <p className="text-muted-foreground font-medium leading-relaxed max-w-xs">
                   Connecting quality trades people with quality customers. South Africa's premium maintenance marketplace.
@@ -302,10 +351,9 @@ export default function LandingPage() {
                   </div>
                </div>
                <div className="space-y-6">
-                  <h4 className="font-black uppercase tracking-widest text-xs text-muted-foreground">Legal</h4>
+                  <h4 className="font-black uppercase tracking-widest text-xs text-muted-foreground">Support</h4>
                   <div className="flex flex-col gap-4 text-base font-bold text-foreground">
-                    <Link href="/privacy" className="hover:text-primary transition-colors">Privacy Policy</Link>
-                    <Link href="/terms" className="hover:text-primary transition-colors">Terms of Service</Link>
+                    <a href="mailto:info@fixlink.org.za" className="hover:text-primary transition-colors">info@fixlink.org.za</a>
                   </div>
                </div>
             </div>
@@ -320,12 +368,7 @@ export default function LandingPage() {
             </div>
          </div>
          <div className="max-w-7xl mx-auto mt-24 pt-8 border-t border-border flex flex-col md:flex-row justify-between items-center gap-6">
-            <p className="text-sm text-muted-foreground font-medium">&copy; 2026 Fix Link (Pty) Ltd. All rights reserved.</p>
-            <div className="flex gap-6 text-sm font-bold text-primary">
-               <span>LinkedIn</span>
-               <span>Twitter</span>
-               <span>Instagram</span>
-            </div>
+            <p className="text-sm text-muted-foreground font-medium">&copy; 2026 FixLink (Pty) Ltd. All rights reserved.</p>
          </div>
       </footer>
     </main>

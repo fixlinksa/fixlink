@@ -26,7 +26,7 @@ export default function TierSelector({ onComplete }: { onComplete?: () => void }
 
   const handleUpgrade = async (tierId: TierId) => {
     if (!user || !profile) return;
-    const tierName = tierId === 'missing' ? 'Link Pro' : 'Link Legend';
+    const tierName = TIER_CONFIG[tierId].name;
     setShowTrialModal({ tierId, name: tierName });
   };
 
@@ -63,19 +63,19 @@ export default function TierSelector({ onComplete }: { onComplete?: () => void }
       ...TIER_CONFIG.starter,
       icon: ShieldCheck,
       description: 'The foundation for your professional journey.',
-      features: ['15km Visibility Radius', 'Basic Profile', 'Lead Access']
+      features: TIER_CONFIG.starter.features
     },
     {
-      ...TIER_CONFIG.missing,
+      ...TIER_CONFIG.gold,
       icon: Zap,
-      description: 'Power up your business with full invoicing and estimates.',
-      features: ['50km Visibility Radius', 'Unlimited Invoices', 'Unlimited Estimates', '150 Inventory Items']
+      description: 'Power up your business with invoicing and professional reach.',
+      features: TIER_CONFIG.gold.features
     },
     {
-      ...TIER_CONFIG.legend,
+      ...TIER_CONFIG.platinum,
       icon: Star,
-      description: 'The ultimate professional ecosystem with regional flexibility.',
-      features: ['70km Visibility Radius', 'Show Public Ratings', 'Regional Flexibility', '500 Inventory Items']
+      description: 'The ultimate professional ecosystem for maximum dominance.',
+      features: TIER_CONFIG.platinum.features
     }
   ];
 
@@ -107,7 +107,7 @@ export default function TierSelector({ onComplete }: { onComplete?: () => void }
                 <div className={cn(
                   "w-12 h-12 rounded-2xl flex items-center justify-center mb-6",
                   tier.id === 'starter' ? "bg-slate-100 text-slate-500" :
-                  tier.id === 'missing' ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"
+                  tier.id === 'gold' ? "bg-primary/10 text-primary" : "bg-accent/10 text-accent"
                 )}>
                   <tier.icon className="w-6 h-6" />
                 </div>
@@ -201,7 +201,7 @@ export default function TierSelector({ onComplete }: { onComplete?: () => void }
                     </div>
                     <div className="space-y-1">
                       <p className="text-sm font-black uppercase tracking-tight italic">Admin Approval Required</p>
-                      <p className="text-xs text-slate-500 font-medium leading-relaxed">After 14 days, your tier will revert to Starter unless an administrator approves the upgrade.</p>
+                      <p className="text-xs text-slate-500 font-medium leading-relaxed">After 14 days, your tier will revert to The Link Starter unless an administrator approves the upgrade.</p>
                     </div>
                   </div>
                 </div>

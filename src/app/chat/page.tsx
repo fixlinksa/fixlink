@@ -41,6 +41,7 @@ import { ref, uploadBytes, uploadString, getDownloadURL } from 'firebase/storage
 import { PdfDocument } from '@/components/PdfDocument';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import { sanitizeForHtml2Canvas } from '@/lib/pdfSanitizer';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/lib/utils';
 import { getRecentEstimatesByTradesman } from '@/lib/db';
@@ -65,18 +66,6 @@ function ChatContent() {
   const chatIdParam = searchParams.get('chatId');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [lastMsgId, setLastMsgId] = useState<string | null>(null);
-
-  // Audio helper for notifications
-  const playAlert = () => {
-    if (profile?.mutedNotifications) return;
-    try {
-      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
-      audio.volume = 0.5;
-      audio.play().catch(e => console.log('Audio playback requires user interaction first.'));
-    } catch (e) {
-      console.error('Audio engine failure:', e);
-    }
-  };
 
   // Scroll to bottom
   const scrollToBottom = () => {
@@ -167,13 +156,9 @@ function ChatContent() {
         id: doc.id
       })) as any[];
       
-      // Play sound for new incoming messages
-      if (msgList.length > 0 && user) {
-        const latestMsg = msgList[msgList.length - 1];
-        if (latestMsg.id !== lastMsgId && latestMsg.senderId !== user.uid) {
-           playAlert();
-           setLastMsgId(latestMsg.id);
-        }
+      // Track latest message ID (no sound — user is actively in the chat)
+      if (msgList.length > 0) {
+        setLastMsgId(msgList[msgList.length - 1].id);
       }
 
       setMessages(msgList);
@@ -278,18 +263,38 @@ function ChatContent() {
       setPdfData({ job: jobData, profile: proProfile, lineItems, totals, type: msg.docType });
 
       // Small delay for DOM to render the hidden PDF component
-      setTimeout(async () => {
-        const input = document.getElementById('chat-pdf-renderer');
-        if (!input) return;
-        const canvas = await html2canvas(input, { scale: 1.5, useCORS: true });
-        const imgData = canvas.toDataURL('image/jpeg', 0.8);
-        const pdf = new jsPDF('p', 'pt', 'a4');
-        const pdfWidth = pdf.internal.pageSize.getWidth();
-        const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
-        pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-        pdf.save(`${msg.docType.toLowerCase()}_${msg.docId.slice(-6)}.pdf`);
-        setDownloadingDoc(null);
-        setPdfData(null);
+      setTimeout(() => {
+        requestAnimationFrame(async () => {
+          try {
+            const input = document.getElementById('chat-pdf-renderer');
+            if (!input) return;
+            const canvas = await html2canvas(input, { 
+              scale: 1.5, 
+              useCORS: true,
+              logging: false,
+              onclone: (clonedDoc) => {
+                sanitizeForHtml2Canvas(clonedDoc, 'chat-pdf-renderer');
+              }
+            });
+            const imgData = canvas.toDataURL('image/jpeg', 0.7);
+            const pdf = new jsPDF({
+              orientation: 'p',
+              unit: 'pt',
+              format: 'a4',
+              compress: true
+            });
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+            pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
+            pdf.save(`${msg.docType.toLowerCase()}_${msg.docId.slice(-6)}.pdf`);
+          } catch (err) {
+            console.error("PDF engine failure:", err);
+            alert("File generation failed. Please try again.");
+          } finally {
+            setDownloadingDoc(null);
+            setPdfData(null);
+          }
+        });
       }, 500);
 
     } catch (err) {

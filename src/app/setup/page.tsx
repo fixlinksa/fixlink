@@ -16,7 +16,7 @@ export default function SetupPage() {
   const router = useRouter();
 
   // Admin credentials from user request
-  const adminEmail = 'admin@fixlink.co.za';
+  const adminEmail = 'admin@fixlink.org.za';
   const adminPassword = 'Sharne2010!';
   const adminName = 'System Admin';
 

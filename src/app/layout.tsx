@@ -17,7 +17,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Fix Link | Quotes. Invoicing. Hire.",
+  title: "FixLink | Quotes. Invoicing. Hire.",
   description: "Fix Link is a two-sided marketplace connecting customers with professional tradesmen for plumbing, electrical, and handyman services.",
   keywords: "fix link, plumbing, electrical, handyman, service marketplace, quotes, invoicing, south africa",
 };

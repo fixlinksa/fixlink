@@ -1,4 +1,4 @@
-import { db } from './firebase';
+import { db, auth } from './firebase';
 export { db };
 import { 
   collection, 
@@ -11,6 +11,7 @@ import {
   getDocs,
   orderBy,
   limit,
+  collectionGroup,
   deleteDoc,
   Timestamp,
   deleteField
@@ -44,7 +45,7 @@ export function invalidateCache(prefix?: string) {
   }
 }
 
-export type UserRole = 'customer' | 'tradesman' | 'admin';
+export type UserRole = 'customer' | 'tradesman' | 'admin' | 'professional' | 'pro';
 
 export interface InventoryItem {
   id: string;
@@ -62,7 +63,7 @@ export interface Job {
   description: string;
   category: string;
   categories: string[];
-  status: 'pending' | 'quoted' | 'estimated' | 'declined' | 'assigned' | 'accepted' | 'in-progress' | 'billed' | 'invoiced' | 'completed' | 'cancelled' | 'drafting';
+  status: 'pending' | 'quoted' | 'estimated' | 'declined' | 'assigned' | 'accepted' | 'secured' | 'in-progress' | 'billed' | 'invoiced' | 'completed' | 'cancelled' | 'drafting';
   total?: number;
   budget?: string | number;
   location: string | { address?: string; lat: number; lng: number };
@@ -79,13 +80,20 @@ export interface Job {
   lineItems?: any[];
   notes?: string;
   images?: string[];
+  depositAmount?: number;
+  depositType?: 'percentage' | 'fixed';
+  depositPaid?: boolean;
+  isPaid?: boolean;
+  amountPaid?: number;
   createdAt: any;
   expireAt?: any;
   estimatedAt?: any;
   billedAt?: any;
   completedAt?: any;
+  proCompletedAt?: any;
   rating?: number;
   review?: string;
+  reference?: string;
 }
 
 export interface UserProfile {
@@ -107,6 +115,7 @@ export interface UserProfile {
   bankName?: string;
   accountHolder?: string;
   accountNumber?: string;
+  accountType?: string;
   branchCode?: string;
   onboardingCompleted?: boolean;
   bio?: string;
@@ -126,11 +135,16 @@ export interface UserProfile {
   estimateExpiryDays?: number;
   tierStatus?: 'active' | 'trial';
   tierTrialExpiresAt?: any;
+  trialStartDate?: any;
   preTrialTier?: TierId;
   createdAt: any;
   status?: 'active' | 'suspended' | 'pending';
   phone?: string;
+  phoneNumber?: string;
+  mobile?: string;
+  contactNumber?: string;
   distance?: number;
+  name?: string;
   mutedNotifications?: boolean;
 }
 
@@ -215,6 +229,27 @@ export function extractCoordinates(location: any): { lat: number; lng: number } 
     return (!isNaN(lat) && !isNaN(lng)) ? { lat, lng } : null;
   }
 
+  // Handle String format "lat, lng" or JSON string
+  if (typeof location === 'string') {
+    try {
+      // Try JSON parse first
+      if (location.startsWith('{')) {
+        const parsed = JSON.parse(location);
+        return extractCoordinates(parsed);
+      }
+      // Try comma split
+      const parts = location.split(',').map(p => p.trim());
+      if (parts.length >= 2) {
+        const lat = parseFloat(parts[0]);
+        const lng = parseFloat(parts[1]);
+        if (!isNaN(lat) && !isNaN(lng)) return { lat, lng };
+      }
+    } catch (e) {
+      // Not parseable
+    }
+    return null;
+  }
+
   // Handle Object formats
   const rawLat = location.lat ?? location.latitude ?? location._lat;
   const rawLng = location.lng ?? location.longitude ?? location.long ?? location._long;
@@ -255,22 +290,17 @@ function lenientTradeMatch(proTradeRaw: string | string[] | undefined, targetTra
 }
 
 export const getProsByTrade = async (trade: string, userLat?: number, userLng?: number) => {
-  const cacheKey = `pros:${trade}:${userLat}:${userLng}:70`;
+  const cacheKey = `pros:${trade}:${userLat}:${userLng}`;
   const cached = getCached<UserProfile[]>(cacheKey);
   if (cached) return cached;
 
-  // Utilize the global tradesman cache to bypass Firestore indexing issues
-  // and ensure instant search availability.
   const allPros = await getUsersByRole('tradesman');
   
   const results: UserProfile[] = [];
-  const STRICT_RADIUS = 70;
 
   allPros.forEach((data) => {
-    // Final Availability Verification
     if (data.isAvailable === false) return;
 
-    // Check new 'trades' array OR legacy 'trade' string
     const match = (trade === 'General Services') || 
                   (data.trades && data.trades.includes(trade)) || 
                   (data.trade && data.trade.includes(trade)) ||
@@ -278,23 +308,58 @@ export const getProsByTrade = async (trade: string, userLat?: number, userLng?: 
 
     if (!match) return;
 
-    let distance = 999;
-    if (userLat && userLng && data.location) {
-      const coords = extractCoordinates(data.location);
-      if (coords) {
-        distance = getDistance(userLat, userLng, coords.lat, coords.lng);
-        if (distance <= STRICT_RADIUS) {
-          results.push({ ...data, distance });
-        }
+    const tierRaw = (data.tier || 'starter').toLowerCase();
+    // Use a safe lookup that doesn't trigger prototype inheritance issues
+    const validTiers = ['platinum', 'gold', 'starter'];
+    const tier = (validTiers.includes(tierRaw) ? tierRaw : 'starter') as keyof typeof TIER_CONFIG;
+    const tierConfig = TIER_CONFIG[tier] || TIER_CONFIG.starter;
+    const allowedRadius = tierConfig.radius || 70;
+
+    // Proximity checking logic
+    const proLocation = data.location || data.address;
+    const coords = extractCoordinates(proLocation);
+
+    // Case 1: We have both user location and professional location
+    if (userLat && userLng && coords) {
+      const distance = getDistance(userLat, userLng, coords.lat, coords.lng);
+      
+      // Strict Radius Enforcement (70km for Gold/Starter, 500km for Platinum)
+      if (distance <= allowedRadius) {
+        results.push({ ...data, tier, distance });
       }
-    } else {
-      // If no center search point, add them all for the universal view
-      results.push({ ...data, distance: 0 });
+      return;
+    } 
+    
+    // Case 2: No user location provided OR professional has no coordinates
+    if (!userLat || !userLng) {
+      // Global/Generic search: Only show high-tier legends
+      if (tier === 'platinum' || (tier === 'gold' && trade === 'General Services')) {
+        results.push({ ...data, tier, distance: 1000 });
+      }
+    } else if (tier === 'platinum' && trade === 'General Services') {
+      // User provided location, but pro has none: Platinum fallback
+      results.push({ ...data, tier, distance: 2000 });
     }
   });
 
-  // Sort by proximity
-  const sorted = results.sort((a, b) => (a.distance || 0) - (b.distance || 0));
+  // Sort by Priority (Tier) then distance
+  const sorted = results.sort((a, b) => {
+    // Ultra-safe priority lookup
+    const getPrio = (t: any) => {
+      const k = String(t || 'starter').toLowerCase();
+      if (k === 'platinum') return 3;
+      if (k === 'gold') return 2;
+      return 1;
+    };
+
+    const prioA = getPrio(a.tier);
+    const prioB = getPrio(b.tier);
+
+    if (prioA !== prioB) {
+      return prioB - prioA; // Higher priority first
+    }
+    return (a.distance || 0) - (b.distance || 0);
+  });
   
   setCache(cacheKey, sorted, 60_000); // 1 min TTL
   return sorted;
@@ -362,17 +427,38 @@ export const getJob = async (jobId: string): Promise<Job | null> => {
     return null;
   } catch (error: any) {
     if (error.code === 'permission-denied') {
-      console.error(`Firestore Permission Denied for job ${jobId}. Ensure security rules allow access.`, error);
+      console.warn(`Firestore Access restricted for mission ${jobId}. Attempting lead fallback...`);
+      try {
+        const leadRef = doc(db, 'leads', jobId);
+        const leadSnap = await getDoc(leadRef);
+        if (leadSnap.exists()) {
+          console.log('RECON SUCCESS: Public lead data recovered.');
+          return { ...leadSnap.data(), id: leadSnap.id, status: 'pending' } as any;
+        }
+      } catch (fallbackError) {
+        console.error('LEAD FALLBACK FAILED:', fallbackError);
+      }
+      return null;
     } else {
       console.error(`Error fetching job ${jobId}:`, error);
+      throw error;
     }
-    throw error;
   }
 };
 
 export const updateJob = async (jobId: string, data: any) => {
   const jobRef = doc(db, 'jobs', jobId);
-  await updateDoc(jobRef, sanitizeData(data));
+  
+  // Explicitly handle unassigning if tradesmanId is null
+  const updateData = { ...data };
+  if (updateData.tradesmanId === null) {
+    updateData.tradesmanId = deleteField();
+  }
+  if (updateData.tradesmanName === null) {
+     updateData.tradesmanName = deleteField();
+  }
+
+  await updateDoc(jobRef, sanitizeData(updateData));
   
   // Leads Sync: If job is no longer pending, remove from marketplace
   try {
@@ -385,7 +471,8 @@ export const updateJob = async (jobId: string, data: any) => {
        if (jobData?.status === 'pending') {
           await setDoc(doc(db, 'leads', jobId), sanitizeData({
              ...jobData,
-             id: jobId
+             id: jobId,
+             jobId: jobId
           }), { merge: true });
        }
     }
@@ -403,7 +490,15 @@ export const deleteJob = async (jobId: string) => {
   // 2. Cascade delete all associated chats
   try {
     const chatsRef = collection(db, 'chats');
-    const q = query(chatsRef, where('jobId', '==', jobId));
+    const userId = auth.currentUser?.uid;
+    let q;
+    
+    if (userId) {
+      q = query(chatsRef, where('jobId', '==', jobId), where('participants', 'array-contains', userId));
+    } else {
+      q = query(chatsRef, where('jobId', '==', jobId));
+    }
+    
     const snapshot = await getDocs(q);
     
     // Batch delete would be safer but simple for now
@@ -437,8 +532,11 @@ export const declineJob = async (jobId: string) => {
   // Re-sync to leads marketplace
   await setDoc(doc(db, 'leads', jobId), sanitizeData({
     ...jobData,
+    id: jobId,
+    jobId: jobId,
     status: 'pending',
-    tradesmanId: null
+    tradesmanId: null,
+    updatedAt: new Date()
   }));
 
   // Notify customer of mission re-deployment
@@ -452,6 +550,46 @@ export const declineJob = async (jobId: string) => {
     read: false
   }));
 };
+
+export const declineEstimate = async (jobId: string, estimateId: string) => {
+  const jobRef = doc(db, 'jobs', jobId);
+  const estimateRef = doc(db, 'jobs', jobId, 'estimates', estimateId);
+  
+  const jobSnap = await getDoc(jobRef);
+  if (!jobSnap.exists()) return;
+  const jobData = jobSnap.data();
+
+  // Mark estimate as declined or delete it? 
+  // User said "decline", let's mark it as declined in the estimate itself
+  // but also check if we should revert the job status.
+  await updateDoc(estimateRef, {
+    status: 'declined',
+    declinedAt: new Date()
+  });
+
+  // Check if there are any other 'pending' estimates
+  const estimatesRef = collection(db, 'jobs', jobId, 'estimates');
+  const estimatesSnap = await getDocs(estimatesRef);
+  const pendingEstimates = estimatesSnap.docs.filter(d => !d.data().status || d.data().status === 'pending');
+
+  if (pendingEstimates.length === 0) {
+    // No more pending estimates, revert job to pending
+    await updateDoc(jobRef, {
+      status: 'pending',
+      estimateAmount: deleteField(),
+      estimatedAt: deleteField()
+    });
+
+    // Re-sync to leads marketplace
+    await setDoc(doc(db, 'leads', jobId), sanitizeData({
+      ...jobData,
+      status: 'pending',
+      estimateAmount: null,
+      estimatedAt: null
+    }));
+  }
+};
+
 
 
 export const createJob = async (data: any) => {
@@ -521,9 +659,10 @@ export const getLeads = async (params: {
   category?: string | string[], 
   proLat?: number, 
   proLng?: number, 
-  radiusKm?: number 
+  radiusKm?: number,
+  proTier?: TierId
 }) => {
-  const { category, proLat, proLng, radiusKm } = params;
+  const { category, proLat, proLng, radiusKm: requestedRadius, proTier } = params;
   const leadsRef = collection(db, 'leads');
   let q;
   
@@ -543,15 +682,31 @@ export const getLeads = async (params: {
   
   const querySnapshot = await getDocs(q);
   const results: any[] = [];
+  const now = Date.now();
   
+  // Get config for the pro's tier
+  const tierConfig = TIER_CONFIG[proTier as TierId] || TIER_CONFIG.starter;
+  const delayMs = (tierConfig.delayHours || 0) * 60 * 60 * 1000;
+  const maxAllowedRadius = tierConfig.radius;
+
   querySnapshot.forEach((doc) => {
     const data = doc.data();
     let include = true;
     
+    // Tier Delay Filtering
+    const createdAt = data.createdAt?.toDate?.() || (data.createdAt && new Date(data.createdAt)) || new Date();
+    const availableAt = createdAt.getTime() + delayMs;
+    
+    if (now < availableAt) {
+      include = false;
+    }
+
     // Distance Filtering (In-Memory)
-    if (proLat && proLng && data.location && radiusKm) {
+    if (include && proLat && proLng && data.location) {
       const distance = getDistance(proLat, proLng, data.location.lat, data.location.lng);
-      if (distance > radiusKm) {
+      
+      // Enforce tier radius limit
+      if (distance > maxAllowedRadius) {
         include = false;
       } else {
         data.distance = distance;
@@ -570,6 +725,27 @@ export const getLeads = async (params: {
     }
     return 0;
   });
+};
+
+export const getProCustomerIds = async (proId: string): Promise<string[]> => {
+  const jobsRef = collection(db, 'jobs');
+  const q = query(jobsRef, where('tradesmanId', '==', proId));
+  const querySnapshot = await getDocs(q);
+  
+  const uniqueCustomers = new Set<string>();
+  querySnapshot.forEach((doc) => {
+    const data = doc.data();
+    if (data.customerId) {
+      uniqueCustomers.add(data.customerId);
+    }
+  });
+  
+  return Array.from(uniqueCustomers);
+};
+
+export const getProCustomerCount = async (proId: string): Promise<number> => {
+  const ids = await getProCustomerIds(proId);
+  return ids.length;
 };
 export const completeJobWithRating = async (jobId: string, rating: number, review: string) => {
   const jobRef = doc(db, 'jobs', jobId);
@@ -617,6 +793,56 @@ export const completeJobWithRating = async (jobId: string, rating: number, revie
       }));
     }
   }
+};
+
+export const markJobAsCompleteByPro = async (jobId: string) => {
+  const jobRef = doc(db, 'jobs', jobId);
+  const jobSnap = await getDoc(jobRef);
+  
+  if (!jobSnap.exists()) throw new Error('Mission not found');
+  const jobData = jobSnap.data();
+  
+  const updateData = {
+    status: 'completed',
+    proCompletedAt: new Date(),
+    updatedAt: new Date()
+  };
+  
+  await updateDoc(jobRef, sanitizeData(updateData));
+  
+  // Notify customer
+  await setDoc(doc(collection(db, 'notifications')), sanitizeData({
+    userId: jobData.customerId,
+    type: 'job_finished_pro',
+    title: 'Mission Update',
+    message: `Professional ${jobData.tradesmanName || 'someone'} has marked the mission "${jobData.title}" as complete. Please provide your review.`,
+    jobId,
+    createdAt: new Date(),
+    read: false
+  }));
+  
+  return jobData;
+};
+
+export const createNotification = async (data: {
+  userId: string;
+  type: string;
+  title: string;
+  message: string;
+  jobId?: string;
+  chatId?: string;
+  createdAt?: Date;
+  read?: boolean;
+}) => {
+  const notifRef = collection(db, 'notifications');
+  const finalData = sanitizeData({
+    ...data,
+    createdAt: data.createdAt || new Date(),
+    read: data.read ?? false
+  });
+  const docRef = doc(notifRef);
+  await setDoc(docRef, finalData);
+  return docRef.id;
 };
 
 export const getNotifications = async (userId: string) => {
@@ -710,18 +936,47 @@ export const sendMessage = async (chatId: string, senderId: string, text: string
   }));
 };
 
-export const getInvoicesByJob = async (jobId: string) => {
+export const getInvoicesByJob = async (jobId: string, tradesmanId?: string) => {
   const invoicesRef = collection(db, 'jobs', jobId, 'invoices');
-  const q = query(invoicesRef, orderBy('createdAt', 'desc'));
+  let q = query(invoicesRef, orderBy('createdAt', 'desc'));
+  
+  if (tradesmanId) {
+    q = query(invoicesRef, where('tradesmanId', '==', tradesmanId));
+  }
+  
   const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+  const data = snap.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
+
+  // In-memory sort if filtered, to avoid index requirements
+  if (tradesmanId) {
+    return data.sort((a, b) => (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0));
+  }
+  return data;
 };
 
-export const getEstimatesByJob = async (jobId: string) => {
+export const getEstimatesByJob = async (jobId: string, tradesmanId?: string) => {
   const estimatesRef = collection(db, 'jobs', jobId, 'estimates');
-  const q = query(estimatesRef, orderBy('createdAt', 'desc'));
+  let q = query(estimatesRef);
+  
+  if (tradesmanId) {
+     q = query(estimatesRef, where('tradesmanId', '==', tradesmanId));
+  }
+  
   const snap = await getDocs(q);
-  return snap.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+  const data = snap.docs.map(doc => ({ ...doc.data() as any, id: doc.id }));
+  
+  // In-Memory Sorting to bypass Firestore Composite Index requirements
+  return data.sort((a, b) => {
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    return bTime - aTime;
+  });
+};
+export const getEstimate = async (jobId: string, estimateId: string): Promise<any> => {
+  const estRef = doc(db, 'jobs', jobId, 'estimates', estimateId);
+  const snap = await getDoc(estRef);
+  if (snap.exists()) return { ...snap.data(), id: snap.id };
+  return null;
 };
 
 export const getRecentEstimatesByTradesman = async (tradesmanId: string) => {
@@ -881,6 +1136,39 @@ export const repairJobFinancials = async (jobId: string) => {
     console.error("Repair mission failed:", e);
   }
 };
+
+async function getNextReference(type: 'estimate' | 'invoice', tradesmanId: string, tradesmanName: string) {
+  const prefix = 'FIX';
+  // Use first 3 letters of professional name, removing spaces
+  const cleanName = (tradesmanName || 'PRO').replace(/[^a-zA-Z]/g, '').toUpperCase();
+  const namePart = cleanName.substring(0, 3).padEnd(3, 'X');
+  
+  const now = new Date();
+  // Format: DDMMYY
+  const d = now.getDate().toString().padStart(2, '0');
+  const m = (now.getMonth() + 1).toString().padStart(2, '0');
+  const y = now.getFullYear().toString().slice(-2);
+  const datePart = `${d}${m}${y}`;
+  
+  const baseRef = `${prefix}${namePart}${datePart}`;
+
+  try {
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const q = query(
+      collectionGroup(db, type === 'estimate' ? 'estimates' : 'invoices'),
+      where('tradesmanId', '==', tradesmanId),
+      where('createdAt', '>=', startOfDay)
+    );
+    const snap = await getDocs(q);
+    const count = snap.size + 1;
+    // User requested "increment to number 2", implying if it's the 2nd one, add "2"
+    return count > 1 ? `${baseRef}${count}` : baseRef;
+  } catch (e) {
+    console.warn(`[db] Reference generation query failed (likely missing index):`, e);
+    return baseRef;
+  }
+}
+
 export const createEstimate = async (jobId: string, data: any) => {
   const jobRef = doc(db, 'jobs', jobId);
   const jobSnap = await getDoc(jobRef);
@@ -890,17 +1178,46 @@ export const createEstimate = async (jobId: string, data: any) => {
   const estimatesRef = collection(db, 'jobs', jobId, 'estimates');
   const docRef = doc(estimatesRef);
   
+  const tradesmanId = data.tradesmanId || jobData.tradesmanId;
+  if (!tradesmanId) throw new Error('PROTOCOL FAILURE: Specialist identity missing for mission briefing.');
+
+  // Robust enrichment: Fetch tradesman business name if missing
+  let enrichedData = { ...data };
+  if (tradesmanId && (!data.tradesmanBusinessName || data.tradesmanBusinessName === 'Pro')) {
+    try {
+      const proProfile = await getUserProfile(tradesmanId);
+      if (proProfile) {
+        enrichedData.tradesmanBusinessName = proProfile.businessName || proProfile.companyName || proProfile.fullName || 'FixLink Pro';
+        if (!enrichedData.tradesmanName) enrichedData.tradesmanName = proProfile.fullName;
+      }
+    } catch (e) {
+      console.warn("DEBUG [db]: Pro enrichment failed for estimate:", e);
+    }
+  }
+
+  const reference = await getNextReference('estimate', tradesmanId, enrichedData.tradesmanBusinessName || enrichedData.tradesmanName);
+
   const estimateData = sanitizeData({
-    ...data,
+    ...enrichedData,
     id: docRef.id,
+    reference,
     jobId,
     customerId: jobData.customerId,
-    tradesmanId: jobData.tradesmanId,
+    tradesmanId,
     createdAt: new Date()
   });
 
   await setDoc(docRef, estimateData);
   return docRef.id;
+};
+
+export const updateEstimate = async (jobId: string, estimateId: string, data: any) => {
+  const estimateRef = doc(db, 'jobs', jobId, 'estimates', estimateId);
+  const estimateData = sanitizeData({
+    ...data,
+    updatedAt: new Date()
+  });
+  await updateDoc(estimateRef, estimateData);
 };
 
 export const createInvoice = async (jobId: string, data: any) => {
@@ -912,17 +1229,74 @@ export const createInvoice = async (jobId: string, data: any) => {
   const invoicesRef = collection(db, 'jobs', jobId, 'invoices');
   const docRef = doc(invoicesRef);
   
+  // Robust enrichment: Fetch tradesman business name if missing
+  let enrichedData = { ...data };
+  if ((data.tradesmanId || jobData.tradesmanId) && (!data.tradesmanBusinessName || data.tradesmanBusinessName === 'Pro')) {
+    try {
+      const tid = data.tradesmanId || jobData.tradesmanId;
+      const proProfile = await getUserProfile(tid);
+      if (proProfile) {
+        enrichedData.tradesmanBusinessName = proProfile.businessName || proProfile.companyName || proProfile.fullName || 'FixLink Pro';
+      }
+    } catch (e) {
+      console.warn("DEBUG [db]: Pro enrichment failed for invoice:", e);
+    }
+  }
+
+  const reference = data.reference || await getNextReference('invoice', data.tradesmanId || jobData.tradesmanId, enrichedData.tradesmanBusinessName);
+
   const invoiceData = sanitizeData({
-    ...data,
+    ...enrichedData,
     id: docRef.id,
+    reference,
     jobId,
-    customerId: jobData.customerId,
-    tradesmanId: jobData.tradesmanId,
+    customerId: data.customerId || jobData.customerId,
+    tradesmanId: data.tradesmanId || jobData.tradesmanId,
     createdAt: new Date()
   });
 
   await setDoc(docRef, invoiceData);
   return docRef.id;
+};
+
+export const updateInvoice = async (jobId: string, invoiceId: string, data: any) => {
+  const invoiceRef = doc(db, 'jobs', jobId, 'invoices', invoiceId);
+  const invoiceData = sanitizeData({
+    ...data,
+    updatedAt: new Date()
+  });
+  await updateDoc(invoiceRef, invoiceData);
+};
+
+export const markInvoiceAsPaid = async (jobId: string, invoiceId: string) => {
+  // 1. Update Invoice Status
+  await updateInvoice(jobId, invoiceId, { status: 'paid', isPaid: true });
+  
+  // 2. Update Job Status
+  await markJobAsPaid(jobId);
+  
+  // 3. Update Job status to completed if it was billed
+  const jobRef = doc(db, 'jobs', jobId);
+  const jobSnap = await getDoc(jobRef);
+  if (jobSnap.exists() && jobSnap.data().status === 'billed') {
+    await updateDoc(jobRef, { status: 'completed' });
+  }
+};
+
+export const markDepositAsPaid = async (jobId: string, amount: number) => {
+  const jobRef = doc(db, 'jobs', jobId);
+  const jobSnap = await getDoc(jobRef);
+  if (!jobSnap.exists()) return;
+  const jobData = jobSnap.data();
+  
+  const currentPaid = jobData.amountPaid || 0;
+  
+  await updateDoc(jobRef, { 
+    depositPaid: true,
+    amountPaid: currentPaid + amount,
+    updatedAt: new Date()
+  });
+  invalidateCache(`job:${jobId}`);
 };
 export const getRecentCustomers = async (tradesmanId: string) => {
   const chatsRef = collection(db, 'chats');
@@ -945,3 +1319,137 @@ export const getRecentCustomers = async (tradesmanId: string) => {
   
   return customers;
 };
+
+export const markJobAsPaid = async (jobId: string, amount?: number) => {
+  const jobRef = doc(db, 'jobs', jobId);
+  const jobSnap = await getDoc(jobRef);
+  if (!jobSnap.exists()) throw new Error('Mission not found');
+  const jobData = jobSnap.data();
+
+  const total = jobData.total || jobData.amount || 0;
+  const currentPaid = jobData.amountPaid || 0;
+  const newPaid = amount !== undefined ? currentPaid + amount : total;
+
+  const isPaid = newPaid >= (total - 0.01); // Use small epsilon for float comparison
+  
+  await updateDoc(jobRef, {
+    amountPaid: newPaid,
+    isPaid,
+    paidAt: isPaid ? new Date() : (jobData.paidAt || null),
+    updatedAt: new Date()
+  });
+
+  // Also update lead if it exists (though billed/invoiced jobs usually aren't in leads)
+  try {
+    const leadRef = doc(db, 'leads', jobId);
+    const leadSnap = await getDoc(leadRef);
+    if (leadSnap.exists()) {
+      await updateDoc(leadRef, {
+        isPaid: newPaid >= total,
+        amountPaid: newPaid
+      });
+    }
+  } catch (e) {
+    // Silent catch for lead sync
+  }
+};
+
+// ─── Reviews ─────────────────────────────────────────────────────────────
+
+export interface ProReview {
+  jobId: string;
+  jobTitle: string;
+  customerName: string;
+  customerId?: string;
+  rating: number;
+  review: string;
+  completedAt: any;
+  reviewRequestSent?: boolean;
+}
+
+/** Fetch all completed jobs for a professional that have a customer rating */
+export const getProReviews = async (tradesmanId: string): Promise<ProReview[]> => {
+  const jobsRef = collection(db, 'jobs');
+  // Use the existing tradesmanId+createdAt index; filter status & rating client-side
+  // to avoid needing a new composite index.
+  const q = query(
+    jobsRef,
+    where('tradesmanId', '==', tradesmanId),
+    orderBy('createdAt', 'desc'),
+    limit(100)
+  );
+  const snap = await getDocs(q);
+  const results: ProReview[] = [];
+  snap.forEach(d => {
+    const data = d.data();
+    if (data.status === 'completed' && typeof data.rating === 'number') {
+      results.push({
+        jobId: d.id,
+        jobTitle: data.title || 'Untitled Job',
+        customerName: data.customerName || 'Client',
+        customerId: data.customerId,
+        rating: data.rating,
+        review: data.review || '',
+        completedAt: data.completedAt,
+        reviewRequestSent: data.reviewRequestSent || false,
+      });
+    }
+  });
+  // Sort by completedAt descending (client-side)
+  results.sort((a, b) => {
+    const aDate = a.completedAt?.toDate?.() ?? new Date(a.completedAt ?? 0);
+    const bDate = b.completedAt?.toDate?.() ?? new Date(b.completedAt ?? 0);
+    return bDate.getTime() - aDate.getTime();
+  });
+  return results;
+};
+
+/** Fetch completed jobs WITHOUT a customer rating — these are candidates for a review request */
+export const getUnreviewedJobs = async (tradesmanId: string): Promise<Job[]> => {
+  const jobsRef = collection(db, 'jobs');
+  // Use the existing tradesmanId+createdAt index; filter status & rating client-side.
+  const q = query(
+    jobsRef,
+    where('tradesmanId', '==', tradesmanId),
+    orderBy('createdAt', 'desc'),
+    limit(100)
+  );
+  const snap = await getDocs(q);
+  const results: Job[] = [];
+  snap.forEach(d => {
+    const data = d.data();
+    if (data.status === 'completed' && typeof data.rating !== 'number') {
+      results.push({ ...data as Job, id: d.id });
+    }
+  });
+  return results.slice(0, 30);
+};
+
+/** Send a review request notification to the customer for a specific job */
+export const sendReviewRequest = async (
+  jobId: string,
+  proName: string
+): Promise<void> => {
+  const jobRef = doc(db, 'jobs', jobId);
+  const jobSnap = await getDoc(jobRef);
+  if (!jobSnap.exists()) throw new Error('Job not found');
+  const jobData = jobSnap.data();
+
+  if (!jobData.customerId) throw new Error('No customer linked to this job');
+
+  // Create notification for the customer
+  await setDoc(doc(collection(db, 'notifications')), sanitizeData({
+    userId: jobData.customerId,
+    type: 'review_request',
+    title: '⭐ How did we do?',
+    message: `${proName} is asking for your feedback on "${jobData.title || 'your recent job'}". A quick review helps them grow!`,
+    jobId,
+    actionUrl: `/jobs/view?id=${jobId}`,
+    createdAt: new Date(),
+    read: false,
+  }));
+
+  // Mark the job so we don't spam the customer
+  await updateDoc(jobRef, { reviewRequestSent: true });
+};
+

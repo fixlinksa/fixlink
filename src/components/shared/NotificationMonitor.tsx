@@ -6,7 +6,7 @@ import { db } from '@/lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bell, X, MessageSquare, ArrowRight } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { markNotificationAsRead } from '@/lib/db';
 
 export default function NotificationMonitor() {
@@ -14,11 +14,13 @@ export default function NotificationMonitor() {
   const [activeNotification, setActiveNotification] = useState<any>(null);
   const [lastNotifId, setLastNotifId] = useState<string | null>(null);
   const router = useRouter();
+  const pathname = usePathname();
 
   // Audio helper for notifications
   const playAlert = () => {
     try {
-      const audio = new Audio('https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3');
+      // Custom chime provided by user
+      const audio = new Audio('/chime.mp3');
       audio.volume = 0.5;
       audio.play().catch(e => console.log('Audio playback requires user interaction first.'));
     } catch (e) {
@@ -56,6 +58,10 @@ export default function NotificationMonitor() {
         const diff = (now.getTime() - createdAt.getTime()) / 1000;
 
         if (diff < 30) {
+          // Suppress notification popup and sound when user is actively in chat
+          const isInChat = pathname === '/chat';
+          if (isInChat) return;
+
           setActiveNotification(notif);
           
           // Play sound for new unseen notifications

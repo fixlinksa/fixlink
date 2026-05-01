@@ -30,11 +30,13 @@ import {
 import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 import TradesmanProfileSetup from '@/components/tradesman/TradesmanProfileSetup';
-import { getJobsByTradesman, getLeads, markNotificationAsRead, toggleAvailability, Job } from '@/lib/db';
+import ProReviewsSection from '@/components/tradesman/ProReviewsSection';
+import { getJobsByTradesman, getLeads, markNotificationAsRead, toggleAvailability, Job, markJobAsPaid, getDistance, extractCoordinates } from '@/lib/db';
 import { db } from '@/lib/firebase';
 import { collection, query, where, orderBy, onSnapshot, limit } from 'firebase/firestore';
 import Link from 'next/link';
 import TierSelector from '@/components/dashboard/tier-selector';
+import { TIER_CONFIG, TierId } from '@/lib/constants';
 import { X } from 'lucide-react';
 
 export default function TradesmanDashboard() {
@@ -44,10 +46,14 @@ export default function TradesmanDashboard() {
   const router = useRouter();
 
   const [jobs, setJobs] = useState<Job[]>([]);
+  const [isCurrentlyBusy, setIsCurrentlyBusy] = useState(profile?.isAvailable === false);
+  const [revenue, setRevenue] = useState(0);
+  const [monthlyRevenue, setMonthlyRevenue] = useState<{ month: string, amount: number }[]>([]);
+  const [loading, setLoading] = useState(true);
   const [leads, setLeads] = useState<any[]>([]);
   const [chats, setChats] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-  const [activeTab, setActiveTab] = useState<'comms' | 'leads' | 'earnings' | 'alerts'>('comms');
+  const [activeTab, setActiveTab] = useState<'comms' | 'leads' | 'earnings' | 'alerts' | 'reviews'>('comms');
   const [feedPeriod, setFeedPeriod] = useState<'day' | 'week' | 'month'>('week');
   const [notifications, setNotifications] = useState<any[]>([]);
 
@@ -73,6 +79,43 @@ export default function TradesmanDashboard() {
     // Notifications Listener
     const notifRef = collection(db, 'notifications');
     const qNotif = query(notifRef, where('userId', '==', user.uid), orderBy('createdAt', 'desc'), limit(20));
+    
+    const unsubscribeJobs = onSnapshot(query(collection(db, 'jobs'), where('tradesmanId', '==', user.uid)), (snapshot) => {
+      const tradesmanJobs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any));
+      setJobs(tradesmanJobs);
+      
+      const total = tradesmanJobs
+        .filter(j => j.isPaid)
+        .reduce((acc, job) => acc + (job.total || job.amount || 0), 0);
+      setRevenue(total);
+
+      // Group revenue by month for the last 6 months
+      const months: { key: string, month: string, amount: number }[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setMonth(d.getMonth() - i);
+        months.push({
+          key: `${d.getFullYear()}-${d.getMonth()}`,
+          month: d.toLocaleString('default', { month: 'short' }),
+          amount: 0
+        });
+      }
+
+      tradesmanJobs.filter(j => j.isPaid).forEach(job => {
+        const dateRaw = job.paidAt || job.updatedAt || job.createdAt || new Date();
+        const paidDate = dateRaw.toDate ? dateRaw.toDate() : new Date(dateRaw);
+        const key = `${paidDate.getFullYear()}-${paidDate.getMonth()}`;
+        const monthIndex = months.findIndex(m => m.key === key);
+        if (monthIndex !== -1) {
+          months[monthIndex].amount += (job.total || job.amount || 0);
+        }
+      });
+
+      setMonthlyRevenue(months.map(({ month, amount }) => ({ month, amount })));
+      setLoading(false);
+    }, (error) => {
+      console.error("Dashboard jobs failure:", error);
+    });
     
     const unsubscribeNotif = onSnapshot(qNotif, (snapshot) => {
       const alerts = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
@@ -125,7 +168,27 @@ export default function TradesmanDashboard() {
     }
 
     const unsubscribeLeads = onSnapshot(qLeads, (snapshot) => {
-      const radarLeads = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }));
+      let radarLeads = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any));
+      
+      // Proximity Filtering [MISSION RADAR]
+      if (profile?.location) {
+        const proCoords = extractCoordinates(profile.location);
+        if (proCoords) {
+          const proTier = profile.tier || 'starter';
+          const allowedRadius = (TIER_CONFIG[proTier as TierId] || TIER_CONFIG.starter).radius || 70;
+
+          radarLeads = radarLeads.filter(lead => {
+            if (!lead.location) return true; // Show if no location specified
+            const leadCoords = extractCoordinates(lead.location);
+            if (!leadCoords) return true;
+
+            const distance = getDistance(proCoords.lat, proCoords.lng, leadCoords.lat, leadCoords.lng);
+            lead.distance = distance;
+            return distance <= allowedRadius;
+          }).sort((a, b) => (a.distance || 0) - (b.distance || 0));
+        }
+      }
+
       setLeads(radarLeads);
       if (loadingData) setLoadingData(false);
     }, (error) => {
@@ -139,6 +202,12 @@ export default function TradesmanDashboard() {
       unsubscribeLeads();
     };
   }, [user, profile]);
+
+  useEffect(() => {
+    if (profile) {
+      setIsCurrentlyBusy(profile.isAvailable === false);
+    }
+  }, [profile]);
 
   const loadDashboardData = async () => {
     // Only fetch static jobs once, leads are handled by real-time listener
@@ -167,14 +236,24 @@ export default function TradesmanDashboard() {
 
   const [toggling, setToggling] = useState(false);
   const handleToggleAvailability = async () => {
-    if (!user) return;
+    if (!profile) return;
     setToggling(true);
     try {
-      await toggleAvailability(user.uid, !profile?.isAvailable);
-    } catch (err) {
-      console.error("Toggle failed:", err);
+      await toggleAvailability(user!.uid, !profile.isAvailable);
+    } catch (error) {
+      console.error("Availability toggle failed:", error);
     } finally {
       setToggling(false);
+    }
+  };
+
+  const handleMarkJobAsPaid = async (jobId: string) => {
+    try {
+      await markJobAsPaid(jobId);
+      // Refresh data
+      loadDashboardData();
+    } catch (error) {
+      console.error("Failed to mark job as paid:", error);
     }
   };
 
@@ -188,12 +267,6 @@ export default function TradesmanDashboard() {
       console.error("Chat deletion failed:", err);
     }
   };
-
-  const isBusy = profile?.isAvailable === false;
-
-  const revenue = jobs
-    .filter(j => j.status === 'completed' || j.status === 'invoiced')
-    .reduce((acc: number, curr: Job) => acc + (curr.total || 0), 0);
 
   const activeProjectsCount = jobs.filter(j => 
     j.status !== 'completed' && 
@@ -263,50 +336,62 @@ export default function TradesmanDashboard() {
                <span className="flex items-center gap-1"><Briefcase className="w-3.5 h-3.5 text-primary" /> {profile?.trade || "Trade not set"}</span>
             </p>
          </div>
-         <div className="flex flex-col md:flex-row flex-wrap gap-4 mt-6 md:mt-0">
-            <button 
-              onClick={() => router.push('/dashboard/tradesman/inventory')}
-              className="px-6 py-4 md:py-5 bg-white border border-slate-100 rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:shadow-xl transition-all shadow-sm"
-            >
-               <Package className="w-4 h-4 md:w-5 md:h-5 text-primary" /> Hub
-            </button>
-            <button 
-              onClick={() => router.push('/dashboard/tradesman/estimates')}
-              className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 text-slate-600 rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all shadow-sm"
-            >
-               <FileText className="w-4 h-4 md:w-5 md:h-5 text-slate-500" /> Estimates
-            </button>
-            <button 
-              onClick={() => router.push('/dashboard/tradesman/invoices')}
-              className="px-6 py-4 md:py-5 bg-slate-50 border border-slate-200 text-slate-600 rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all shadow-sm"
-            >
-               <FileText className="w-4 h-4 md:w-5 md:h-5 text-slate-500" /> Invoices
-            </button>
-            
-            {/* Availability Toggle */}
-            <button 
+          <div className="flex flex-col md:flex-row flex-wrap gap-4 mt-6 md:mt-0 items-center justify-center md:justify-start">
+            {/* 1. Availability Toggle (Slider) */}
+            <motion.button 
+              layout
               onClick={handleToggleAvailability}
               disabled={toggling}
               className={cn(
-                "px-8 py-4 md:py-5 rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-lg border-2",
+                "relative flex items-center h-11 md:h-12 w-[180px] md:w-[220px] p-1 rounded-[2rem] transition-colors duration-500 shadow-xl border-2",
                 profile?.isAvailable !== false 
-                ? "bg-green-500 text-white border-green-400 shadow-green-500/20" 
-                : "bg-orange-500 text-white border-orange-400 shadow-orange-500/20"
+                ? "bg-green-500 border-green-400/30 justify-end" 
+                : "bg-red-500 border-red-400/30 justify-start"
               )}
             >
-              <div className={cn("w-2 h-2 rounded-full", profile?.isAvailable !== false ? "bg-white animate-pulse" : "bg-white/50")} />
-              {toggling ? "Calibrating..." : (profile?.isAvailable !== false ? "Mission Ready" : "Occupied")}
-            </button>
+              {/* Background Text Labels */}
+              <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
+                 <span className={cn(
+                   "text-[7px] md:text-[8px] font-black uppercase tracking-widest transition-all duration-500", 
+                   profile?.isAvailable !== false ? "opacity-0 -translate-x-2" : "text-white opacity-100 translate-x-0"
+                 )}>
+                    Busy
+                 </span>
+                 <span className={cn(
+                   "text-[7px] md:text-[8px] font-black uppercase tracking-widest transition-all duration-500", 
+                   profile?.isAvailable !== false ? "text-white opacity-100 translate-x-0" : "opacity-0 translate-x-2"
+                 )}>
+                    Open
+                 </span>
+              </div>
 
-            <button 
-              onClick={() => router.push('/dashboard/tradesman/projects')}
-              className="px-6 py-4 md:py-5 bg-slate-900 text-white rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 active:scale-95 shadow-2xl transition-all"
-            >
-               <PlusCircle className="w-4 h-4 md:w-5 md:h-5" /> Projects
-            </button>
+              {/* Sliding Thumb */}
+              <motion.div 
+                layout
+                className="h-full w-[85px] md:w-[105px] bg-white rounded-[1.8rem] shadow-lg z-20 flex items-center justify-center gap-1.5"
+              >
+                {toggling ? (
+                  <Loader2 className="w-3 h-3 animate-spin text-slate-400" />
+                ) : (
+                  <>
+                    <div className={cn(
+                      "w-1.5 h-1.5 rounded-full", 
+                      profile?.isAvailable !== false ? "bg-green-500 animate-pulse" : "bg-red-500"
+                    )} />
+                    <span className={cn(
+                      "text-[8px] font-black uppercase tracking-widest", 
+                      profile?.isAvailable !== false ? "text-green-600" : "text-red-600"
+                    )}>
+                      {profile?.isAvailable !== false ? "Open" : "Booked"}
+                    </span>
+                  </>
+                )}
+              </motion.div>
+            </motion.button>
+            {/* 2. Leads */}
             <button 
               onClick={() => router.push('/dashboard/tradesman/leads')}
-              className="px-6 py-4 md:py-5 bg-accent text-white rounded-[2rem] font-black text-[10px] md:text-xs uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 active:scale-95 shadow-2xl shadow-accent/20 transition-all relative"
+              className="h-11 md:h-12 w-[180px] md:w-[220px] bg-accent text-white rounded-[2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 active:scale-95 shadow-2xl shadow-accent/20 transition-all relative shrink-0"
             >
                <Radar className="w-4 h-4 md:w-5 md:h-5" /> Leads
                {leads.length > 0 && (
@@ -315,55 +400,87 @@ export default function TradesmanDashboard() {
                  </span>
                )}
             </button>
+            {/* 3. Projects */}
+            <button 
+              onClick={() => router.push('/dashboard/tradesman/projects')}
+              className="h-11 md:h-12 w-[180px] md:w-[220px] bg-slate-900 text-white rounded-[2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-105 active:scale-95 shadow-2xl transition-all shrink-0"
+            >
+               <PlusCircle className="w-4 h-4 md:w-5 md:h-5" /> Projects
+            </button>
+            
+            {/* 4. Hub */}
+            <button 
+              onClick={() => router.push('/dashboard/tradesman/inventory')}
+              className="h-11 md:h-12 w-[180px] md:w-[220px] bg-white border border-slate-100 rounded-[2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:shadow-xl transition-all shadow-sm shrink-0"
+            >
+               <Package className="w-4 h-4 md:w-5 md:h-5 text-primary" /> Hub
+            </button>
+
+            {/* 5. Estimates */}
+            <button 
+              onClick={() => router.push('/dashboard/tradesman/estimates')}
+              className="h-11 md:h-12 w-[180px] md:w-[220px] bg-slate-50 border border-slate-200 text-slate-600 rounded-[2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all shadow-sm shrink-0"
+            >
+               <FileText className="w-4 h-4 md:w-5 md:h-5 text-slate-500" /> Estimates
+            </button>
+            {/* 6. Invoices */}
+            <button 
+              onClick={() => router.push('/dashboard/tradesman/invoices')}
+              className="h-11 md:h-12 w-[180px] md:w-[220px] bg-slate-50 border border-slate-200 text-slate-600 rounded-[2rem] font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-3 hover:bg-slate-100 transition-all shadow-sm shrink-0"
+            >
+               <FileText className="w-4 h-4 md:w-5 md:h-5 text-slate-500" /> Invoices
+            </button>
          </div>
       </section>
 
       {/* Membership Intelligence Card */}
-      <section className="bg-white border-2 border-slate-100 rounded-[3.5rem] p-10 shadow-sm relative overflow-hidden group">
+      <section className="bg-white border-2 border-slate-100 rounded-[3.5rem] p-6 md:p-10 shadow-sm relative overflow-hidden group">
          <div className="absolute top-0 right-0 w-64 h-64 bg-slate-50 rounded-full blur-3xl -mr-32 -mt-32 opacity-50" />
          <div className="flex flex-col md:flex-row items-center justify-between gap-8 relative">
-            <div className="flex items-center gap-6">
-               <div className={cn(
-                 "w-20 h-20 rounded-3xl flex items-center justify-center text-white shadow-2xl",
-                 profile?.tier === 'legend' ? "bg-accent shadow-accent/20" : 
-                 profile?.tier === 'missing' ? "bg-primary shadow-primary/20" : "bg-slate-900 shadow-slate-900/20"
-               )}>
-                  {profile?.tier === 'legend' ? <Star className="w-10 h-10" /> : 
-                   profile?.tier === 'missing' ? <Zap className="w-10 h-10" /> : <Layers className="w-10 h-10" />}
-               </div>
-               <div>
-                  <div className="flex items-center gap-3 mb-1">
-                    <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">
-                      {profile?.tier === 'legend' ? 'Link Legend' : 
-                       profile?.tier === 'missing' ? 'Link Pro' : 'Link Starter'}
-                    </h3>
-                    {profile?.tierStatus === 'trial' && (
-                      <span className="px-3 py-1 bg-accent/10 text-accent rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
-                        <Clock className="w-3 h-3" /> Trial Active
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Current Professional Standing</p>
-               </div>
-            </div>
+             <div className="flex items-center gap-6">
+                <div className={cn(
+                  "w-20 h-20 rounded-3xl flex items-center justify-center text-white shadow-2xl",
+                  profile?.tier === 'platinum' ? "bg-accent shadow-accent/20" : 
+                  profile?.tier === 'gold' ? "bg-primary shadow-primary/20" : 
+                  "bg-slate-900 shadow-slate-900/20"
+                )}>
+                   {profile?.tier === 'platinum' ? <Star className="w-10 h-10" /> : 
+                    profile?.tier === 'gold' ? <Zap className="w-10 h-10" /> : 
+                    <Layers className="w-10 h-10" />}
+                </div>
+                <div>
+                   <div className="flex items-center gap-3 mb-1">
+                     <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">
+                        {TIER_CONFIG[profile?.tier as TierId]?.name || 'The Fix Link'}
+                     </h3>
+                     {profile?.tierStatus === 'trial' && (
+                       <span className="px-3 py-1 bg-accent/10 text-accent rounded-full text-[9px] font-black uppercase tracking-widest flex items-center gap-1">
+                         <Clock className="w-3 h-3" /> Trial Active
+                       </span>
+                     )}
+                   </div>
+                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Current Professional Standing</p>
+                </div>
+             </div>
 
-            <div className="flex flex-col md:flex-row items-center gap-6">
-               <div className="text-center md:text-right hidden sm:block">
-                  <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] mb-1">Status Report</p>
-                  <p className="text-xs font-black text-slate-600 uppercase italic">
-                    {profile?.tier === 'legend' ? "Highest Efficiency Attained" : 
-                     profile?.tier === 'missing' ? "Legend Tier: 70km Radius & Public Ratings" : "Pro Tier: 50km Radius & Invoicing"}
-                  </p>
-               </div>
-               {profile?.tier !== 'legend' && (
-                 <button 
-                  onClick={() => setShowTierModal(true)}
-                  className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest italic hover:scale-105 active:scale-95 shadow-xl transition-all flex items-center gap-3"
-                 >
-                    Upgrade to {profile?.tier === 'starter' ? 'Pro' : 'Legend'} <ArrowRight className="w-4 h-4" />
-                 </button>
-               )}
-            </div>
+             <div className="flex flex-col md:flex-row items-center gap-6">
+                <div className="text-center md:text-right hidden sm:block">
+                   <p className="text-[9px] font-black text-slate-300 uppercase tracking-[0.2em] mb-1">Status Report</p>
+                   <p className="text-xs font-black text-slate-600 uppercase italic">
+                     {profile?.tier === 'platinum' ? "Highest Efficiency Attained" : 
+                      profile?.tier === 'gold' ? "The Link Gold: 70km Radius & Invoicing" :
+                      "The Fix Link: 50km Radius & Lead Discovery"}
+                   </p>
+                </div>
+                {profile?.tier !== 'platinum' && (
+                  <button 
+                   onClick={() => setShowTierModal(true)}
+                   className="px-8 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest italic hover:scale-105 active:scale-95 shadow-xl transition-all flex items-center gap-3"
+                  >
+                     Upgrade to {profile?.tier === 'starter' ? 'The Link Gold' : 'The Link Platinum'} <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+             </div>
          </div>
       </section>
 
@@ -429,14 +546,14 @@ export default function TradesmanDashboard() {
 
       {/* Brand Identity / Storefront Section */}
       <section className="bg-white border border-slate-100 rounded-[4rem] p-12 shadow-sm relative overflow-hidden group">
-        {/* Upgrade Indicator for non-Legend tiers */}
-        {profile?.tier !== 'legend' && (
+        {/* Upgrade Indicator for non-Platinum tiers */}
+        {profile?.tier !== 'platinum' && (
           <div className="absolute top-10 right-10 z-20">
             <button 
               onClick={() => setShowTierModal(true)}
               className="px-6 py-3 bg-accent text-white rounded-2xl text-[9px] font-black uppercase tracking-[0.2em] italic hover:scale-105 active:scale-95 shadow-xl transition-all flex items-center gap-2"
             >
-              <Star className="w-4 h-4 fill-white" /> Upgrade to Legend
+              <Star className="w-4 h-4 fill-white" /> Upgrade to The Link Platinum
             </button>
           </div>
         )}
@@ -518,6 +635,7 @@ export default function TradesmanDashboard() {
             { id: 'leads', label: 'Mission Radar', icon: Zap, count: leads.length },
             { id: 'alerts', label: 'System Alerts', icon: Bell, count: unreadCount - unreadMessages },
             { id: 'earnings', label: 'Economic Hub', icon: Wallet },
+            { id: 'reviews', label: 'Ratings', icon: Star },
          ].map((tab) => (
             <button
                key={tab.id}
@@ -587,7 +705,7 @@ export default function TradesmanDashboard() {
                         key={chat.id} 
                         onClick={() => router.push(`/chat?chatId=${chat.id}`)}
                         className={cn(
-                          "group p-10 rounded-[3.5rem] flex flex-col justify-between gap-8 hover:shadow-2xl transition-all cursor-pointer relative overflow-hidden border",
+                          "group p-6 md:p-10 rounded-[3.5rem] flex flex-col justify-between gap-8 hover:shadow-2xl transition-all cursor-pointer relative overflow-hidden border",
                           hasUnread ? "bg-primary/5 border-primary/20 shadow-xl" : "bg-white border-slate-100"
                         )}
                       >
@@ -659,12 +777,12 @@ export default function TradesmanDashboard() {
                    <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">Mission <span className="text-primary tracking-normal">Radar</span></h3>
                 </div>
 
-                {isBusy ? (
+                {isCurrentlyBusy ? (
                   <div className="p-16 text-center bg-slate-900 rounded-[4rem] border-4 border-dashed border-white/5 relative overflow-hidden group">
                      <div className="absolute top-0 right-0 w-64 h-64 bg-primary/10 rounded-full blur-3xl -mr-32 -mt-32 animate-pulse" />
                      <Radar className="w-16 h-16 text-primary mx-auto mb-8 opacity-40 animate-spin" />
                      <h4 className="text-white text-3xl font-black italic uppercase tracking-tighter mb-4">Radar on Standby</h4>
-                     <p className="text-slate-400 font-bold italic tracking-tight mb-10 max-w-sm mx-auto opacity-70">You are currently marked as <span className="text-orange-500 not-italic">Occupied</span>. Complete existing missions or toggle your status to "Mission Ready" to receive new transmissions.</p>
+                     <p className="text-slate-400 font-bold italic tracking-tight mb-10 max-w-sm mx-auto opacity-70">You are currently marked as <span className="text-red-500 not-italic">Currently Busy on Site</span>. Complete existing missions or toggle your status to "Open for Jobs" to receive new transmissions.</p>
                      <button 
                         onClick={handleToggleAvailability}
                         className="px-12 py-5 bg-white text-slate-900 rounded-[2rem] font-black text-xs uppercase tracking-widest hover:scale-105 active:scale-95 transition-all shadow-2xl"
@@ -678,7 +796,7 @@ export default function TradesmanDashboard() {
                       <div 
                         key={lead.id} 
                         onClick={() => router.push(`/jobs/view?id=${lead.id}`)}
-                        className="group p-10 bg-white border border-slate-100 rounded-[4rem] flex flex-col md:flex-row md:items-center justify-between gap-8 hover:shadow-2xl transition-all cursor-pointer relative overflow-hidden"
+                        className="group p-6 md:p-10 bg-white border border-slate-100 rounded-[4rem] flex flex-col md:flex-row md:items-center justify-between gap-8 hover:shadow-2xl transition-all cursor-pointer relative overflow-hidden"
                       >
                          <div className="absolute top-0 right-0 w-24 h-24 bg-primary/5 rounded-full blur-2xl -mr-12 -mt-12 group-hover:scale-150 transition-transform duration-700" />
                          
@@ -689,9 +807,14 @@ export default function TradesmanDashboard() {
                            <div>
                              <p className="text-[10px] font-black text-primary uppercase tracking-[0.2em] mb-2">{lead.category}</p>
                              <h4 className="font-black text-slate-900 uppercase italic tracking-tighter text-2xl mb-1">{lead.title}</h4>
-                             <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
-                               <MapPin className="w-3.5 h-3.5" /> {typeof lead.location === 'string' ? lead.location : lead.location?.address || 'Cape Town'}
-                             </p>
+                              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest flex items-center gap-2">
+                                <MapPin className="w-3.5 h-3.5" /> {typeof lead.location === 'string' ? lead.location : lead.location?.address || 'Cape Town'}
+                                {lead.distance !== undefined && (
+                                  <span className="ml-2 px-2 py-0.5 bg-primary/10 text-primary rounded-full lowercase">
+                                    {Math.round(lead.distance)}km away
+                                  </span>
+                                )}
+                              </p>
                            </div>
                          </div>
                          <ArrowRight className="w-8 h-8 text-slate-200 group-hover:text-primary transition-all group-hover:translate-x-2 hidden md:block" />
@@ -748,16 +871,73 @@ export default function TradesmanDashboard() {
                       </div>
                    )}
                 </div>
+
+                {/* Outstanding Invoices Section */}
+                <div className="space-y-6">
+                   <div className="flex items-center justify-between px-4">
+                      <h4 className="text-sm font-black uppercase tracking-[0.2em] text-slate-400 italic">Outstanding <span className="text-primary">Missions</span></h4>
+                      <div className="px-3 py-1 bg-primary/10 rounded-full">
+                         <span className="text-[10px] font-black text-primary uppercase tracking-widest">{jobs.filter(j => (j.status === 'invoiced' || j.status === 'billed') && !j.isPaid).length} Awaiting</span>
+                      </div>
+                   </div>
+
+                   <div className="grid grid-cols-1 gap-4">
+                      {jobs.filter(j => (j.status === 'invoiced' || j.status === 'billed') && !j.isPaid).length > 0 ? (
+                         jobs.filter(j => (j.status === 'invoiced' || j.status === 'billed') && !j.isPaid).map((job) => (
+                            <div key={job.id} className="p-8 bg-white border border-slate-100 rounded-[3rem] shadow-sm hover:shadow-md transition-all group">
+                               <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                                  <div className="flex items-center gap-6">
+                                     <div className="w-16 h-16 bg-slate-50 rounded-[1.5rem] flex items-center justify-center group-hover:bg-primary/5 transition-colors">
+                                        <FileText className="w-8 h-8 text-slate-400 group-hover:text-primary transition-colors" />
+                                     </div>
+                                     <div>
+                                        <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-1 italic">{job.id}</p>
+                                        <h4 className="text-xl font-black text-slate-900 italic uppercase tracking-tighter">{job.customerName || 'Direct Invoice'}</h4>
+                                        <p className="text-xs font-bold text-slate-400 italic">{job.title}</p>
+                                     </div>
+                                  </div>
+                                  <div className="flex flex-col items-end gap-2">
+                                     <p className="text-2xl font-black text-slate-900 italic tracking-tighter">R {job.total || job.amount || 0}<span className="text-sm opacity-20">.00</span></p>
+                                     <div className="flex items-center gap-3">
+                                        <Link 
+                                           href={`/jobs/view/invoice?id=${job.id}`}
+                                           className="px-6 py-3 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-primary transition-colors italic"
+                                        >
+                                           View Invoice
+                                        </Link>
+                                        <button 
+                                           onClick={() => handleMarkJobAsPaid(job.id)}
+                                           className="px-6 py-3 bg-green-600 text-white rounded-2xl text-[10px] font-black uppercase tracking-widest hover:bg-green-500 transition-colors italic flex items-center gap-2"
+                                        >
+                                           Mark Paid
+                                           <CheckCircle2 className="w-3 h-3" />
+                                        </button>
+                                     </div>
+                                  </div>
+                               </div>
+                            </div>
+                         ))
+                      ) : (
+                         <div className="p-12 bg-slate-50 rounded-[3rem] border-2 border-dashed border-slate-200 flex flex-col items-center justify-center text-center">
+                            <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mb-4 shadow-sm">
+                               <ShieldCheck className="w-8 h-8 text-slate-300" />
+                            </div>
+                            <p className="text-sm font-black text-slate-400 uppercase tracking-widest italic">All Economic Objectives Secured</p>
+                            <p className="text-[10px] text-slate-300 font-bold italic mt-2">No outstanding invoices detected in your current sector.</p>
+                         </div>
+                      )}
+                   </div>
+                </div>
              </motion.section>
            )}
 
-          {activeTab === 'earnings' && (
+           {activeTab === 'earnings' && (
             <motion.section 
                key="earnings"
                initial={{ opacity: 0, x: -20 }}
                animate={{ opacity: 1, x: 0 }}
                exit={{ opacity: 0, x: 20 }}
-               className="space-y-8"
+               className="space-y-12"
             >
                <div className="flex items-center justify-between px-4 mt-4">
                   <h3 className="text-2xl font-black uppercase tracking-tighter italic text-slate-900">Economic <span className="text-primary tracking-normal">Hub</span></h3>
@@ -770,18 +950,82 @@ export default function TradesmanDashboard() {
                      <h2 className="text-6xl font-black tracking-tighter italic">R {revenue}<span className="text-xl opacity-20">.00</span></h2>
                   </div>
 
-                  <div className="p-12 bg-white border border-slate-100 rounded-[4rem] shadow-sm">
+                  <div className="p-12 bg-white border border-slate-100 rounded-[4rem] shadow-sm flex flex-col justify-center">
                      <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-400 mb-3 italic">Operation Density</p>
                      <h2 className="text-6xl font-black tracking-tighter italic text-slate-900">{jobs.length}<span className="text-xl text-slate-300"> JOBS</span></h2>
                   </div>
                </div>
+
+               {/* Custom Revenue Chart */}
+               <div className="p-12 bg-white border border-slate-100 rounded-[4rem] shadow-sm">
+                  <div className="flex items-center justify-between mb-12">
+                    <div>
+                      <h4 className="text-sm font-black uppercase tracking-[0.2em] text-slate-900 italic">Revenue <span className="text-primary">Trajectory</span></h4>
+                      <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mt-1">Last 6 Months Performance</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                       <div className="w-3 h-3 bg-primary rounded-full" />
+                       <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Gross Revenue</span>
+                    </div>
+                  </div>
+
+                  <div className="h-64 flex items-end justify-between gap-4 overflow-x-auto pb-4 custom-scrollbar">
+                    {monthlyRevenue.map((data, i) => {
+                      const maxAmount = Math.max(...monthlyRevenue.map(m => m.amount), 1);
+                      const height = (data.amount / maxAmount) * 100;
+                      return (
+                        <div key={i} className="flex-1 flex flex-col items-center gap-4 group">
+                          <div className="relative w-full flex flex-col items-center">
+                            {data.amount > 0 && (
+                              <motion.div 
+                                initial={{ opacity: 0, y: 10 }}
+                                whileHover={{ opacity: 1, y: 0 }}
+                                className="absolute -top-8 bg-slate-900 text-white text-[8px] font-black px-2 py-1 rounded-md pointer-events-none z-10"
+                              >
+                                R{data.amount}
+                              </motion.div>
+                            )}
+                            <motion.div 
+                              initial={{ height: 0 }}
+                              animate={{ height: `${height}%` }}
+                              transition={{ duration: 1, delay: i * 0.1, ease: "easeOut" }}
+                              className={cn(
+                                "w-full max-w-[40px] rounded-2xl transition-all duration-300 relative overflow-hidden",
+                                data.amount > 0 ? "bg-primary shadow-lg shadow-primary/20" : "bg-slate-50 border-2 border-dashed border-slate-100"
+                              )}
+                            >
+                               <div className="absolute inset-0 bg-gradient-to-t from-black/10 to-transparent" />
+                            </motion.div>
+                          </div>
+                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest group-hover:text-primary transition-colors">{data.month}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+               </div>
+            </motion.section>
+          )}
+          {activeTab === 'reviews' && (
+            <motion.section
+              key="reviews"
+              initial={{ opacity: 0, x: -20 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 20 }}
+              className="space-y-6 px-4 pt-4"
+            >
+              <ProReviewsSection
+                tradesmanId={user!.uid}
+                proName={profile?.fullName || profile?.businessName || 'Your Professional'}
+                overallRating={profile?.rating}
+                reviewCount={profile?.reviewCount}
+              />
             </motion.section>
           )}
         </AnimatePresence>
       </div>
 
       {/* Intelligence HQ */}
-      <section className="p-10 rounded-[3rem] bg-slate-900 text-white relative overflow-hidden shadow-2xl border border-white/5">
+      <section className="p-6 md:p-10 rounded-[3rem] bg-slate-900 text-white relative overflow-hidden shadow-2xl border border-white/5">
          <div className="absolute top-0 right-0 w-32 h-32 bg-primary/10 rounded-full blur-3xl -mr-16 -mt-16" />
          <div className="w-12 h-12 bg-white/5 rounded-2xl flex items-center justify-center mb-6 border border-white/10">
             <ShieldCheck className="w-6 h-6 text-primary" />

@@ -40,6 +40,7 @@ export default function TradesmanProfileSetup({ userId, onComplete }: TradesmanP
     bankName: '',
     accountHolder: '',
     accountNumber: '',
+    accountType: '',
     branchCode: ''
   });
 
@@ -58,6 +59,7 @@ export default function TradesmanProfileSetup({ userId, onComplete }: TradesmanP
           bankName: formData.bankName,
           accountHolder: formData.accountHolder,
           accountNumber: formData.accountNumber,
+          accountType: formData.accountType,
           branchCode: formData.branchCode,
         });
         onComplete();
@@ -246,13 +248,20 @@ export default function TradesmanProfileSetup({ userId, onComplete }: TradesmanP
                    onChange={(e) => setFormData({ ...formData, accountNumber: e.target.value })}
                    className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-bold transition-all shadow-sm"
                  />
-                 <input 
-                   type="text"
-                   placeholder="Branch Code"
-                   value={formData.branchCode}
-                   onChange={(e) => setFormData({ ...formData, branchCode: e.target.value })}
-                   className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-bold transition-all shadow-sm"
-                 />
+                  <input 
+                    type="text"
+                    placeholder="Account Type (e.g. Savings)"
+                    value={formData.accountType}
+                    onChange={(e) => setFormData({ ...formData, accountType: e.target.value })}
+                    className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-bold transition-all shadow-sm"
+                  />
+                  <input 
+                    type="text"
+                    placeholder="Branch Code"
+                    value={formData.branchCode}
+                    onChange={(e) => setFormData({ ...formData, branchCode: e.target.value })}
+                    className="w-full px-6 py-5 bg-slate-50 border border-slate-100 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary font-bold transition-all shadow-sm"
+                  />
               </div>
 
               <button 

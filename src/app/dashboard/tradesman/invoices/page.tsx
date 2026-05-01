@@ -17,8 +17,9 @@ import {
   Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { getJobsByTradesman, Job, deleteJob } from '@/lib/db';
+import { getJobsByTradesman, Job, deleteJob, markJobAsPaid } from '@/lib/db';
 import { cn } from '@/lib/utils';
+import { CheckCircle2, Clock } from 'lucide-react';
 
 export default function InvoicesHistoryPage() {
   const router = useRouter();
@@ -26,6 +27,8 @@ export default function InvoicesHistoryPage() {
   const [invoices, setInvoices] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
+  const [filter, setFilter] = useState<'all' | 'outstanding' | 'paid'>('all');
+  const [actionLoading, setActionLoading] = useState<string | null>(null);
 
   useEffect(() => {
     if (!authLoading && user?.uid) {
@@ -62,11 +65,32 @@ export default function InvoicesHistoryPage() {
      }
   };
 
-  const filteredInvoices = invoices.filter(e => 
-    e.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.id.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const handleMarkAsPaid = async (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    if (!window.confirm("Mark this invoice as fully paid?")) return;
+    
+    setActionLoading(id);
+    try {
+      await markJobAsPaid(id);
+      setInvoices(prev => prev.map(inv => inv.id === id ? { ...inv, isPaid: true, amountPaid: inv.total || inv.amount || 0 } : inv));
+    } catch (error) {
+      console.error("Failed to mark as paid:", error);
+    } finally {
+      setActionLoading(null);
+    }
+  };
+
+  const filteredInvoices = invoices.filter(e => {
+    const matchesSearch = e.customerName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      e.title?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      e.id.toLowerCase().includes(searchTerm.toLowerCase());
+    
+    if (!matchesSearch) return false;
+    
+    if (filter === 'outstanding') return !e.isPaid;
+    if (filter === 'paid') return e.isPaid;
+    return true;
+  });
 
   if (authLoading || loading) return (
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -106,21 +130,44 @@ export default function InvoicesHistoryPage() {
             </button>
         </div>
 
-        {/* Search & Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-           <div className="md:col-span-2 relative group">
-              <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-primary transition-colors" />
-              <input 
-                type="text"
-                placeholder="Search revenue archives by name or ID..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-16 pr-8 py-6 bg-white border border-slate-100 rounded-[2rem] shadow-sm outline-none focus:border-primary transition-all font-bold text-slate-600 italic"
-              />
+        {/* Search & Tabs */}
+        <div className="flex flex-col gap-6">
+           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              <div className="md:col-span-2 relative group">
+                 <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-300 group-focus-within:text-primary transition-colors" />
+                 <input 
+                   type="text"
+                   placeholder="Search revenue archives by name or ID..."
+                   value={searchTerm}
+                   onChange={(e) => setSearchTerm(e.target.value)}
+                   className="w-full pl-16 pr-8 py-6 bg-white border border-slate-100 rounded-[2rem] shadow-sm outline-none focus:border-primary transition-all font-bold text-slate-600 italic"
+                 />
+              </div>
+              <div className="bg-primary/5 border border-primary/10 rounded-[2rem] p-6 flex flex-col justify-center items-center text-center">
+                 <p className="text-[10px] font-black uppercase tracking-widest text-primary/60 mb-1 italic">Filtered Revenue Stream</p>
+                 <h2 className="text-3xl font-black text-primary italic tracking-tighter">{filteredInvoices.length} INVOICES</h2>
+              </div>
            </div>
-           <div className="bg-primary/5 border border-primary/10 rounded-[2rem] p-6 flex flex-col justify-center items-center text-center">
-              <p className="text-[10px] font-black uppercase tracking-widest text-primary/60 mb-1 italic">Total Revenue Stream</p>
-              <h2 className="text-3xl font-black text-primary italic tracking-tighter">{invoices.length} INVOICES</h2>
+
+           <div className="flex p-2 bg-slate-100/50 rounded-[2rem] w-fit">
+              {[
+                { id: 'all', label: 'All Invoices' },
+                { id: 'outstanding', label: 'Outstanding' },
+                { id: 'paid', label: 'Paid' }
+              ].map((tab) => (
+                <button
+                  key={tab.id}
+                  onClick={() => setFilter(tab.id as any)}
+                  className={cn(
+                    "px-8 py-3 rounded-full text-[10px] font-black uppercase tracking-widest transition-all italic",
+                    filter === tab.id 
+                      ? "bg-white text-primary shadow-sm" 
+                      : "text-slate-400 hover:text-slate-600"
+                  )}
+                >
+                  {tab.label}
+                </button>
+              ))}
            </div>
         </div>
 
@@ -137,41 +184,73 @@ export default function InvoicesHistoryPage() {
                   className="bg-white border border-slate-100 rounded-[3rem] p-8 md:p-10 shadow-sm hover:shadow-xl hover:border-primary/20 transition-all group cursor-pointer flex flex-col md:flex-row items-center justify-between gap-8 relative overflow-hidden"
                 >
                    <div className="flex items-center gap-8 flex-1 relative z-10">
-                      <div className="w-20 h-20 bg-slate-50 border border-slate-100 rounded-[2rem] flex items-center justify-center text-slate-300 group-hover:bg-primary group-hover:text-white transition-all duration-500">
-                         <Wallet className="w-10 h-10" />
+                      <div className={cn(
+                        "w-20 h-20 border rounded-[2rem] flex items-center justify-center transition-all duration-500",
+                        inv.isPaid 
+                          ? "bg-green-50 border-green-100 text-green-500" 
+                          : "bg-slate-50 border-slate-100 text-slate-300 group-hover:bg-primary group-hover:text-white"
+                      )}>
+                         {inv.isPaid ? <CheckCircle2 className="w-10 h-10" /> : <Wallet className="w-10 h-10" />}
                       </div>
                       <div className="space-y-2">
                          <div className="flex items-center gap-3">
                             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">{inv.id.slice(0, 8)}</span>
                             <span className="w-1.5 h-1.5 bg-border rounded-full" />
-                            <span className="text-[10px] font-black text-green-500 uppercase tracking-widest italic">Encrypted Payload</span>
+                            {inv.isPaid ? (
+                              <span className="text-[10px] font-black text-green-500 uppercase tracking-widest italic flex items-center gap-1.5">
+                                <CheckCircle2 className="w-3 h-3" /> Paid In Full
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-black text-amber-500 uppercase tracking-widest italic flex items-center gap-1.5">
+                                <Clock className="w-3 h-3" /> Payment Pending
+                              </span>
+                            )}
                          </div>
                          <h3 className="text-2xl font-black uppercase italic tracking-tight text-slate-900 group-hover:text-primary transition-colors">{inv.customerName || 'Standard Client'}</h3>
                          <div className="flex flex-wrap gap-4 text-[10px] font-black text-slate-400 uppercase tracking-widest italic opacity-60">
                             <span className="flex items-center gap-2"><Calendar className="w-3.5 h-3.5" /> Issued: {inv.createdAt?.seconds ? new Date(inv.createdAt.seconds * 1000).toLocaleDateString() : 'N/A'}</span>
-                            <span className="flex items-center gap-2 text-green-500"><ShieldCheck className="w-3.5 h-3.5" /> Verified Secure</span>
+                            {(inv.depositAmount || 0) > 0 && (
+                              <span className="text-primary font-black uppercase">Deposit Required</span>
+                            )}
                          </div>
                       </div>
                    </div>
 
-                    <div className="flex items-center justify-between md:flex-col md:items-end gap-4 relative z-10">
-                       <p className="text-4xl font-black text-slate-900 tracking-tighter italic">R {inv.total || inv.amount || '0.00'}</p>
-                       <div className="flex items-center gap-3">
-                          <button 
-                            onClick={(e) => { e.stopPropagation(); handleDelete(inv.id); }}
-                            className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
-                            title="Delete Permanently"
-                          >
-                             <Trash2 className="w-5 h-5" />
-                          </button>
-                          <button 
-                            onClick={() => router.push(`/jobs/view/invoice?id=${inv.id}`)}
-                            className="p-4 bg-primary/10 text-primary rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm"
-                          >
-                             <ChevronRight className="w-5 h-5" />
-                          </button>
-                       </div>
-                    </div>
+                     <div className="flex items-center justify-between md:flex-col md:items-end gap-4 relative z-10">
+                        <div className="text-right">
+                           <p className={cn(
+                             "text-4xl font-black tracking-tighter italic transition-colors",
+                             inv.isPaid ? "text-green-500" : "text-slate-900 group-hover:text-primary"
+                           )}>R {inv.total || inv.amount || '0.00'}</p>
+                            {(inv.amountPaid || 0) > 0 && !inv.isPaid && (
+                              <p className="text-[10px] font-black text-green-500 uppercase italic opacity-80">Paid: R {inv.amountPaid}</p>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-3">
+                           {!inv.isPaid && (
+                             <button 
+                               onClick={(e) => handleMarkAsPaid(e, inv.id)}
+                               disabled={actionLoading === inv.id}
+                               className="px-6 py-4 bg-green-500 text-white rounded-2xl font-black text-[10px] uppercase tracking-widest hover:bg-green-600 transition-all shadow-md active:scale-95 disabled:opacity-50"
+                             >
+                                {actionLoading === inv.id ? "Processing..." : "Mark as Paid"}
+                             </button>
+                           )}
+                           <button 
+                             onClick={(e) => { e.stopPropagation(); handleDelete(inv.id); }}
+                             className="p-4 bg-slate-50 text-slate-400 rounded-2xl hover:bg-red-500 hover:text-white transition-all shadow-sm"
+                             title="Delete Permanently"
+                           >
+                              <Trash2 className="w-5 h-5" />
+                           </button>
+                           <button 
+                             onClick={() => router.push(`/jobs/view/invoice?id=${inv.id}`)}
+                             className="p-4 bg-primary/10 text-primary rounded-2xl hover:bg-primary hover:text-white transition-all shadow-sm"
+                           >
+                              <ChevronRight className="w-5 h-5" />
+                           </button>
+                        </div>
+                     </div>
 
                    <div className="absolute top-0 right-0 w-32 h-32 bg-primary/5 rounded-bl-[8rem] group-hover:scale-110 transition-transform" />
                 </motion.div>
