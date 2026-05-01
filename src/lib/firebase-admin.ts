@@ -40,25 +40,26 @@ function getAdminApp() {
     }
   }
 
-  // 2. Try Local Files
-  const saPaths = [
-    path.join(process.cwd(), 'sa.json'),
-    path.join(process.cwd(), 'src', 'lib', 'sa.json'),
-    '/Users/coetzee/Documents/FixLink/sa.json'
-  ];
+  // 2. Try Local Files (only in development)
+  if (process.env.NODE_ENV !== 'production') {
+    const saPaths = [
+      path.join(process.cwd(), 'sa.json'),
+      path.join(process.cwd(), 'src', 'lib', 'sa.json'),
+    ];
 
-  console.log('Firebase Admin: Searching for sa.json in:', saPaths);
+    console.log('Firebase Admin: Searching for sa.json in:', saPaths);
 
-  for (const saPath of saPaths) {
-    if (fs.existsSync(saPath)) {
-      try {
-        console.log('Firebase Admin: Found service account at', saPath);
-        const serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
-        return admin.initializeApp({
-          credential: admin.credential.cert(serviceAccount),
-        });
-      } catch (error: any) {
-        console.error(`Firebase Admin: Error loading ${saPath}:`, error.message);
+    for (const saPath of saPaths) {
+      if (fs.existsSync(saPath)) {
+        try {
+          console.log('Firebase Admin: Found service account at', saPath);
+          const serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
+          return admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount),
+          });
+        } catch (error: any) {
+          console.error(`Firebase Admin: Error loading ${saPath}:`, error.message);
+        }
       }
     }
   }

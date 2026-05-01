@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   title: "FixLink | Quotes. Invoicing. Hire.",
   description: "Fix Link is a two-sided marketplace connecting customers with professional tradesmen for plumbing, electrical, and handyman services.",
   keywords: "fix link, plumbing, electrical, handyman, service marketplace, quotes, invoicing, south africa",
+  verification: {
+    google: "I65Q3SBA0A4xOeAE7HaR35jpgy020pqTIiB1bQGx20o",
+  }
 };
 
 export const viewport: Viewport = {
