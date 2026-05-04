@@ -395,7 +395,7 @@ export default function TradesmanDashboard() {
             >
                <Radar className="w-4 h-4 md:w-5 md:h-5" /> Leads
                {leads.length > 0 && (
-                 <span className="absolute -top-1 -right-1 w-6 h-6 bg-white text-accent rounded-full flex items-center justify-center text-[10px] font-black shadow-lg">
+                 <span className="absolute -top-2 -right-2 w-8 h-8 bg-primary text-white rounded-full flex items-center justify-center text-[12px] font-black shadow-2xl border-2 border-white animate-bounce">
                    {leads.length}
                  </span>
                )}
@@ -608,17 +608,17 @@ export default function TradesmanDashboard() {
             onClick={() => setActiveTab('alerts')}
             className="bg-primary/5 border-2 border-primary/20 p-8 rounded-[3rem] flex items-center justify-between group cursor-pointer hover:bg-white hover:shadow-2xl transition-all"
          >
-            <div className="flex items-center gap-6">
-               <div className="w-14 h-14 bg-primary rounded-2xl flex items-center justify-center animate-bounce shadow-xl shadow-primary/20 text-white">
-                  <Bell className="w-6 h-6" />
-               </div>
-               <div>
-                  <p className="text-[10px] font-black uppercase tracking-widest text-primary mb-1">Incoming Intel</p>
-                  <h4 className="font-black text-slate-900 uppercase italic tracking-tighter text-xl">
-                     {unreadCount} Unread Mission Transmission(s)
-                  </h4>
-               </div>
-            </div>
+             <div className="flex items-center gap-6">
+                <div className="w-16 h-16 md:w-20 md:h-20 bg-primary rounded-3xl flex items-center justify-center animate-bounce shadow-2xl shadow-primary/40 text-white border-4 border-white/20">
+                   <Bell className="w-8 h-8 md:w-10 md:h-10" />
+                </div>
+                <div>
+                   <p className="text-[11px] font-black uppercase tracking-[0.3em] text-primary mb-1 animate-pulse">Critical Transmission Incoming</p>
+                   <h4 className="font-black text-slate-900 uppercase italic tracking-tighter text-2xl md:text-3xl">
+                      {unreadCount} Unread Message(s)
+                   </h4>
+                </div>
+             </div>
             <ArrowRight className="w-6 h-6 text-primary group-hover:translate-x-2 transition-transform" />
          </motion.div>
       )}
@@ -647,11 +647,11 @@ export default function TradesmanDashboard() {
             >
                <tab.icon className={cn("w-4 h-4", activeTab === tab.id ? "fill-primary/10" : "")} />
                {tab.label}
-               {tab.count !== undefined && tab.count > 0 && (
-                 <span className="w-5 h-5 bg-primary text-white rounded-full flex items-center justify-center text-[8px] font-black shadow-lg shadow-primary/20">
-                   {tab.count}
-                 </span>
-               )}
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span className="w-6 h-6 bg-primary text-white rounded-full flex items-center justify-center text-[10px] font-black shadow-lg shadow-primary/20 animate-pulse border-2 border-white">
+                    {tab.count}
+                  </span>
+                )}
                {activeTab === tab.id && (
                   <motion.div 
                      layoutId="activeTab"

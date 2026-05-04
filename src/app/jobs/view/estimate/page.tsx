@@ -10,12 +10,15 @@ import {
   FileText,
   User,
   Package,
+  XCircle,
+  Play,
   CheckCircle2,
   AlertCircle,
+  ScrollText,
+  ShieldAlert,
   Loader2,
   Download,
-  Mail,
-  Send
+  Mail
 } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
@@ -51,6 +54,7 @@ function EstimateContent() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [lineItems, setLineItems] = useState<EstimateLineItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -64,7 +68,7 @@ function EstimateContent() {
   const [createdJobId, setCreatedJobId] = useState<string | null>(null);
 
   useEffect(() => {
-    if (user) {
+    if (user && !authLoading) {
        loadData();
     }
   }, [user, id, authLoading]);
@@ -120,13 +124,19 @@ function EstimateContent() {
           console.error('DEBUG [Estimate]: Inventory fetch error:', invErr);
         }
 
-        // IMPORTANT: Authorization Logic
         const isTradesman = jobData?.tradesmanId === user.uid;
         
         // 2. User is a pro/tradesman and the job is in a public state (including 'lead')
         const userRole = (profile?.role || '').toLowerCase();
-        const isProRole = userRole === 'tradesman' || userRole === 'professional' || userRole === 'pro';
-        const publicStatuses = ['pending', 'available', 'open', 'estimated', 'quoted', 'declined', 'lead'];
+        const isProRole = userRole === 'tradesman' || 
+                         userRole === 'professional' || 
+                         userRole === 'pro' || 
+                         userRole === 'hero' || 
+                         userRole === 'operative' ||
+                         userRole === 'tradesperson' ||
+                         userRole === 'provider';
+                         
+        const publicStatuses = ['pending', 'available', 'open', 'estimated', 'quoted', 'declined', 'lead', 'ready', 'active', 'published', 'in-progress', 'in_progress', 'assigned'];
         const isPublicAccess = publicStatuses.includes((jobData?.status || '').toLowerCase()) && isProRole;
 
         // 3. User is the customer who owns the job
@@ -134,6 +144,12 @@ function EstimateContent() {
         
         // 4. User is an admin
         const isAdmin = userRole === 'admin';
+
+        if (authLoading) {
+           console.log('DEBUG [Estimate Guard]: Auth still loading, deferring guard.');
+           setLoading(false);
+           return;
+        }
 
         if (!isTradesman && !isPublicAccess && !isCustomer && !isAdmin) {
           console.warn('DEBUG [Estimate Guard]: Access denied.', { 
@@ -145,7 +161,8 @@ function EstimateContent() {
             isCustomer,
             isAdmin
           });
-          router.push(`/dashboard?error=unauthorized&status=${jobData?.status}&role=${profile?.role}`);
+          setError(`Unauthorized Access: Your account (${profile?.role || 'Guest'}) does not have authorization to architect estimates for this mission status (${jobData?.status || 'Unknown'}).`);
+          setLoading(false);
           return;
         }
 
@@ -223,9 +240,9 @@ function EstimateContent() {
           router.push('/dashboard/tradesman?error=job_missing');
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading data:', error);
-      router.push('/dashboard/tradesman?error=load_failed');
+      setError(`Critical Data Failure: ${error.message || 'Mission protocols could not be established.'}`);
     } finally {
       setLoading(false);
     }
@@ -299,9 +316,9 @@ function EstimateContent() {
 
   const totals = lineItems.reduce((acc, item) => {
     const itemTotalIncl = item.sellingIncl * item.quantity;
-    const isVatRegistered = profile?.isVatRegistered || false;
+    const isVatRegistered = profile?.isVatRegistered || job?.isVatRegistered || false;
     const itemTotalExcl = isVatRegistered ? (itemTotalIncl / 1.15) : itemTotalIncl;
-    const itemCostTotal = item.costExcl * item.quantity;
+    const itemCostTotal = (item.costExcl || 0) * item.quantity;
 
     return {
       excl: acc.excl + itemTotalExcl,
@@ -410,17 +427,32 @@ function EstimateContent() {
 
   const handleDownloadPdf = async () => {
     setIsSaving(true);
+    console.log('[Estimate] Starting PDF generation sequence...');
+    
     try {
       const canvas = await renderPdfCanvas('pdf-document');
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
-      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      
+      const pdf = new jsPDF({ 
+        orientation: 'p', 
+        unit: 'mm', 
+        format: 'a4', 
+        compress: true 
+      });
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      pdf.save(`estimate_${id}.pdf`);
+      
+      const filename = `Estimate_${job?.reference || id?.slice(0,8)}.pdf`;
+      console.log(`[Estimate] PDF generated successfully. Downloading ${filename}`);
+      pdf.save(filename);
+      
     } catch (err: any) {
-      console.error('PDF generation failed:', err);
-      alert(`PDF Error: ${err?.message || 'Rendering failed'}. Please try again.`);
+      console.error('[Estimate] PDF Error:', err);
+      alert(`PDF Protocol Error: ${err?.message || 'Unknown rendering failure'}. Please check if the estimate content is visible.`);
     } finally {
       setIsSaving(false);
     }
@@ -432,12 +464,23 @@ function EstimateContent() {
       return;
     }
     setIsEmailing(true);
+    console.log('[Estimate] Initializing PDF for email dispatch...');
+
     try {
       const canvas = await renderPdfCanvas('pdf-document');
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
-      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      
+      const pdf = new jsPDF({ 
+        orientation: 'p', 
+        unit: 'mm', 
+        format: 'a4', 
+        compress: true 
+      });
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       const pdfBase64 = pdf.output('datauristring');
 
@@ -449,7 +492,7 @@ function EstimateContent() {
           proName: profile?.businessName || profile?.fullName || 'Professional',
           type: 'Estimate',
           pdfBase64,
-          filename: `estimate_${job.id}.pdf`
+          filename: `Estimate_${job.id.slice(0,8)}.pdf`
         })
       });
       if (response.ok) {
@@ -536,6 +579,32 @@ function EstimateContent() {
   if (loading) return (
      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Loader2 className="w-12 h-12 text-primary animate-spin" />
+     </div>
+  );
+  
+  if (error) return (
+     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md w-full bg-white rounded-[3rem] p-12 text-center shadow-2xl border border-slate-100">
+           <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-8 text-red-500">
+              <ShieldAlert className="w-10 h-10" />
+           </div>
+           <h2 className="text-3xl font-black uppercase tracking-tight italic mb-4">Access <span className="text-red-500">Restricted</span></h2>
+           <p className="text-slate-500 font-medium leading-relaxed mb-10 italic">
+              {error}
+           </p>
+           <button 
+             onClick={() => router.push('/dashboard')}
+             className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-widest text-xs hover:scale-105 transition-all shadow-xl shadow-black/10"
+           >
+             Return to Dashboard
+           </button>
+        </div>
+     </div>
+  );
+
+  if (!job) return (
+     <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-slate-400 font-black uppercase tracking-widest italic">Mission Intelligence Not Found</p>
      </div>
   );
 
@@ -653,24 +722,42 @@ function EstimateContent() {
                            readOnly={isReadOnly}
                            className="text-2xl font-black text-slate-900 tracking-tight uppercase italic bg-slate-50 border-transparent rounded-xl px-4 py-2 outline-none focus:border-primary shadow-inner w-full"
                          />
-                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                           <input
-                             type="text"
-                             placeholder="Phone Number"
-                             value={job?.customerPhone || ''}
-                             onChange={(e) => !isReadOnly && setJob({ ...job!, customerPhone: e.target.value })}
-                             readOnly={isReadOnly}
-                             className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
-                           />
-                           <input
-                             type="email"
-                             placeholder="Email Address"
-                             value={job?.customerEmail || ''}
-                             onChange={(e) => !isReadOnly && setJob({ ...job!, customerEmail: e.target.value })}
-                             readOnly={isReadOnly}
-                             className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
-                           />
-                         </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            <input
+                              type="text"
+                              placeholder="Phone Number"
+                              value={job?.customerPhone || ''}
+                              onChange={(e) => !isReadOnly && setJob({ ...job!, customerPhone: e.target.value })}
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                            />
+                            <input
+                              type="email"
+                              placeholder="Email Address"
+                              value={job?.customerEmail || ''}
+                              onChange={(e) => !isReadOnly && setJob({ ...job!, customerEmail: e.target.value })}
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                            />
+                            <input
+                              type="text"
+                              placeholder="Customer VAT Number (if applicable)"
+                              value={job?.customerVatNumber || ''}
+                              onChange={(e) => !isReadOnly && setJob({ ...job!, customerVatNumber: e.target.value, isVatRegistered: !!e.target.value })}
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                            />
+                            <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl">
+                               <input 
+                                 type="checkbox"
+                                 checked={job?.isVatRegistered || false}
+                                 onChange={(e) => !isReadOnly && setJob({ ...job!, isVatRegistered: e.target.checked })}
+                                 disabled={isReadOnly}
+                                 className="w-4 h-4 accent-primary rounded-lg"
+                               />
+                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">VAT Registered Customer</span>
+                            </div>
+                          </div>
                          <LocationSearch
                            key={`loc-${job?.customerId || 'draft'}-${job?.customerAddress || 'none'}`}
                            defaultValue={job?.customerAddress}
@@ -709,7 +796,7 @@ function EstimateContent() {
                          initial={{ opacity: 0, x: -20 }}
                          animate={{ opacity: 1, x: 0 }}
                          exit={{ opacity: 0, x: 20 }}
-                         className="flex flex-col md:flex-row items-end md:items-center gap-4 p-4 rounded-[2rem] border border-slate-100 bg-slate-50/30"
+                          className="flex flex-col md:flex-row items-stretch md:items-center gap-4 p-6 rounded-[2.5rem] border border-slate-100 bg-slate-50/30"
                        >
                           <div className="flex-1 space-y-1 w-full relative">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Inventory Link</label>
@@ -729,7 +816,7 @@ function EstimateContent() {
                                        });
                                     }
                                   }}
-                                  className={`w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary shadow-sm appearance-none ${isReadOnly ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                  className={`w-full bg-white border-transparent p-5 rounded-2xl text-sm font-black uppercase tracking-tight outline-none focus:border-primary shadow-sm appearance-none ${isReadOnly ? 'opacity-70 cursor-not-allowed' : ''}`}
                                 >
                                   <option value="" disabled>Select from Inventory...</option>
                                   {inventory.map(inv => (
@@ -739,26 +826,26 @@ function EstimateContent() {
                                 {!isReadOnly && (
                                    <button
                                      onClick={() => setIsQuickAddOpen(true)}
-                                  className="shrink-0 aspect-square p-4 bg-white text-slate-400 border border-transparent rounded-xl hover:text-primary hover:border-primary/20 shadow-sm transition-all"
+                                  className="shrink-0 aspect-square p-5 bg-white text-slate-400 border border-transparent rounded-2xl hover:text-primary hover:border-primary/20 shadow-sm transition-all"
                                   title="Add new stock inline"
                                 >
-                                   <Plus className="w-4 h-4" />
+                                   <Plus className="w-5 h-5" />
                                 </button>
                                  )}
                               </div>
                            </div>
-                           <div className="w-24 space-y-1">
+                            <div className="w-full md:w-24 space-y-1">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Qty</label>
                              <input
                                type="number"
                                readOnly={isReadOnly}
                                value={item.quantity}
                                onChange={(e) => updateItem(item.id, { quantity: parseFloat(e.target.value) })}
-                               className={`w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary text-center shadow-sm ${isReadOnly ? 'bg-slate-50 text-slate-500' : ''}`}
+                               className={`w-full bg-white border-transparent p-5 rounded-2xl text-sm font-black outline-none focus:border-primary text-center shadow-sm ${isReadOnly ? 'bg-slate-50 text-slate-500' : ''}`}
                              />
                           </div>
-                          <div className="w-32 space-y-1">
-                             <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Unit (Incl)</label>
+                           <div className="w-full md:w-32 space-y-1">
+                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Unit (Incl)</label>
                              <div className="relative">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-black">R</span>
                                 <input
@@ -766,14 +853,14 @@ function EstimateContent() {
                                   readOnly={isReadOnly}
                                   onChange={(e) => updateItem(item.id, { sellingIncl: parseFloat(e.target.value) || 0 })}
                                   value={item.sellingIncl}
-                                  className={`w-full bg-white border-transparent p-4 pl-7 rounded-xl text-[11px] font-bold outline-none focus:border-primary shadow-sm ${isReadOnly ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : ''}`}
+                                  className={`w-full bg-white border-transparent p-5 pl-8 rounded-2xl text-sm font-black outline-none focus:border-primary shadow-sm ${isReadOnly ? 'bg-slate-50 text-slate-500 cursor-not-allowed' : ''}`}
                                 />
                              </div>
                           </div>
-                          <div className="text-right px-4 shrink-0 min-w-[5rem]">
-                             <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic mb-0.5">Total</p>
-                             <p className="text-sm font-black text-slate-900">R{(item.sellingIncl * item.quantity).toFixed(2)}</p>
-                          </div>
+                           <div className="text-left md:text-right px-4 shrink-0 min-w-[5rem]">
+                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic mb-0.5">Total</p>
+                              <p className="text-lg md:text-sm font-black text-slate-900">R{(item.sellingIncl * item.quantity).toFixed(2)}</p>
+                           </div>
                            {!isReadOnly && (
                              <button
                                onClick={() => removeLineItem(item.id)}
@@ -931,9 +1018,9 @@ function EstimateContent() {
                         <button
                           onClick={() => handleCustomerAction('accepted')}
                           disabled={isSaving}
-                          className="w-full py-8 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
+                          className="w-full py-10 md:py-8 bg-green-600 text-white rounded-[2.5rem] font-black uppercase tracking-widest text-base md:text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
                         >
-                           {isSaving ? <Loader2 className="w-6 h-6 animate-spin" /> : <CheckCircle2 className="w-6 h-6" />}
+                           {isSaving ? <Loader2 className="w-8 h-8 animate-spin" /> : <CheckCircle2 className="w-8 h-8" />}
                            Pay Deposit & Secure Specialist
                         </button>
                       )}
@@ -960,9 +1047,9 @@ function EstimateContent() {
                         <button
                           onClick={handleSaveEstimate}
                           disabled={isSaving || isFinalizing || lineItems.length === 0}
-                          className="w-full py-8 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
+                          className="w-full py-10 md:py-8 bg-primary text-white rounded-[2.5rem] font-black uppercase tracking-widest text-base md:text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
                         >
-                           {(isSaving || isFinalizing) ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Update & Resend'}
+                           {(isSaving || isFinalizing) ? <Loader2 className="w-8 h-8 animate-spin" /> : 'Update & Resend'}
                         </button>
                       )}
                       <div className="grid grid-cols-2 gap-4">
@@ -985,9 +1072,9 @@ function EstimateContent() {
                    <button
                      onClick={handleSaveEstimate}
                      disabled={isSaving || isFinalizing || lineItems.length === 0}
-                     className="w-full py-8 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
+                     className="w-full py-10 md:py-8 bg-primary text-white rounded-[2.5rem] font-black uppercase tracking-widest text-base md:text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
                    >
-                     {(isSaving || isFinalizing) ? <Loader2 className="w-6 h-6 animate-spin" /> : 'Issue Estimate'}
+                     {(isSaving || isFinalizing) ? <Loader2 className="w-8 h-8 animate-spin" /> : 'Issue Estimate'}
                    </button>
                  )}
              </div>

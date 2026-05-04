@@ -94,6 +94,8 @@ export interface Job {
   rating?: number;
   review?: string;
   reference?: string;
+  isVatRegistered?: boolean;
+  customerVatNumber?: string;
 }
 
 export interface UserProfile {

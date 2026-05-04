@@ -24,7 +24,8 @@ import {
   Play,
   CheckCircle,
   AlertCircle,
-  ScrollText
+  ScrollText,
+  ShieldAlert
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -64,6 +65,7 @@ function JobDetailContent() {
   const [job, setJob] = useState<any>(null);
   const [proProfile, setProProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'overview' | 'estimates' | 'invoices'>('overview');
   const [showRatingModal, setShowRatingModal] = useState(false);
   const [rating, setRating] = useState(5);
@@ -74,9 +76,10 @@ function JobDetailContent() {
   const [invoices, setInvoices] = useState<any[]>([]);
   const [loadingInvoices, setLoadingInvoices] = useState<boolean>(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [hasSkippedRating, setHasSkippedRating] = useState(false);
 
   // Derived Operative States
-  const isTradesmanView = profile?.role === 'tradesman';
+  const isTradesmanView = profile?.role === 'tradesman' || profile?.role === 'professional' || profile?.role === 'pro';
   const isAdminView = profile?.role === 'admin';
   const tier = profile?.tier as string;
   const isPending = job?.status === 'pending';
@@ -94,7 +97,8 @@ function JobDetailContent() {
   const loadJob = async () => {
     if (!id) {
        console.error('JOB DATA MISSING: No job ID provided in query parameters.');
-       router.push('/dashboard?error=missing_id');
+       setError('Protocol Error: Mission identifier missing from transmission.');
+       setLoading(false);
        return;
     }
     
@@ -104,79 +108,109 @@ function JobDetailContent() {
       const data = await getJob(id);
       
       // Privacy Guard: Allow owner, customer, OR any professional IF the job is pending (lead)
-      // IMPORTANT: Wait for authLoading to be false before triggering unauthorized redirects
+      // IMPORTANT: Wait for authLoading AND profile to be available before triggering unauthorized redirects
       if (!authLoading && data && user) {
+        // If we have a user but no profile yet, wait for the next render when profile arrives
+        // This prevents race conditions where auth is ready but profile snapshot is still inflight
+        if (!profile) {
+           console.log('DEBUG [Privacy Guard]: Auth ready but profile pending. Skipping guard this cycle.');
+           return; 
+        }
+
         const isOwner = data.customerId === user.uid;
         const isAssignedPro = data.tradesmanId === user.uid;
         const isCustomer = data.customerId === user.uid;
         const userRole = (profile?.role || '').toLowerCase();
-        const isTradesman = userRole === 'tradesman' || userRole === 'professional' || userRole === 'pro';
+        
+        // Comprehensive professional role check
+        const isTradesman = userRole === 'tradesman' || 
+                           userRole === 'professional' || 
+                           userRole === 'pro' || 
+                           userRole === 'tradesperson' || 
+                           userRole === 'provider' ||
+                           userRole === 'hero' ||
+                           userRole === 'operative';
+                           
         const isAdmin = userRole === 'admin';
 
         // Privacy Guard: Allow if owner, customer, admin, or if it's an open job being viewed by a pro
         const jobStatus = (data.status || '').toLowerCase();
-        const publicStatuses = ['pending', 'available', 'open', 'estimated', 'quoted', 'declined', 'lead'];
-        const isPublicAccess = publicStatuses.includes(jobStatus) && isTradesman;
+        const publicStatuses = ['pending', 'available', 'open', 'estimated', 'quoted', 'declined', 'lead', 'published', 'active', 'ready', 'in-progress', 'in_progress', 'assigned'];
+        const isPublicMatch = publicStatuses.includes(jobStatus);
+        const isPublicAccess = isPublicMatch && (isTradesman || isAdmin);
         
-        console.log('DEBUG [Privacy Guard]:', { 
+        console.log('DEBUG [Privacy Guard] Verification:', { 
           jobId: id,
           userUid: user.uid,
           userRole: profile?.role,
           jobStatus: data.status,
           isOwner,
-          isCustomer,
           isAssignedPro,
           isAdmin,
           isTradesman,
           isPublicAccess,
-          matchesPublicStatus: publicStatuses.includes(jobStatus)
+          isPublicMatch
         });
 
-        if (!isOwner && !isCustomer && !isAssignedPro && !isPublicAccess && !isAdmin) {
-           console.warn("Privacy Guard: Unauthorized access attempt. Redirecting to dashboard.", { 
+        // REAX: If the status is public, we allow ANY professional to view it
+        // If the status is NOT public, only owner, assigned pro, or admin can view it
+        const hasAccess = isOwner || isCustomer || isAssignedPro || isPublicAccess || isAdmin;
+
+        if (!hasAccess) {
+           console.error("Privacy Guard Blocked Access:", { 
              status: data.status, 
              role: profile?.role,
-             isOwner,
-             isCustomer,
-             isAssignedPro,
-             isPublicAccess,
-             isAdmin
+             uid: user.uid,
+             isPublicMatch
            });
-           router.push(`/dashboard?error=unauthorized&status=${data.status}&role=${profile?.role}`);
+           
+           // INSTEAD OF REDIRECTING, set an error state so the user can see what happened
+           setError(`Unauthorized Access: This mission is currently ${data.status} and you do not have authorization to view its secure details.`);
+           setLoading(false);
            return;
         }
       } else if (!authLoading && !user) {
-         console.warn('RECON FAILURE: No authenticated operative detected. Redirecting to login.');
-         router.push('/login');
-         return;
+          setError("Session Expired: Please log in to view mission details.");
+          setLoading(false);
+          return;
       }
 
       setJob(data);
       
       // Security-Aware Data Fetching: 
       // Professionals only fetch their own estimates/invoices to avoid permission errors
-      const filterId = isTradesmanView ? user?.uid : undefined;
-      
-      const [invs, ests] = await Promise.all([
-        getInvoicesByJob(id, filterId),
-        getEstimatesByJob(id, filterId)
-      ]);
-      setInvoices(invs);
-      setEstimates(ests);
+      // If we are viewing a lead, we might not have permission to list these sub-collections yet
+      try {
+        const filterId = isTradesmanView ? user?.uid : undefined;
+        const [invs, ests] = await Promise.all([
+          getInvoicesByJob(id, filterId),
+          getEstimatesByJob(id, filterId)
+        ]);
+        setInvoices(invs || []);
+        setEstimates(ests || []);
+      } catch (financialError) {
+        console.warn('MISSION INTEL: Financial data restricted or unavailable for this operative.', financialError);
+        setInvoices([]);
+        setEstimates([]);
+      }
       
       // Load pro profile for statement if not already loaded
       if (data?.tradesmanId) {
-        const pProfile = await getUserProfile(data.tradesmanId);
-        setProProfile(pProfile);
+        try {
+          const pProfile = await getUserProfile(data.tradesmanId);
+          setProProfile(pProfile);
+        } catch (e) {
+          console.warn("Pro profile fetch failed (non-critical)", e);
+        }
       } else if (isTradesmanView) {
         setProProfile(profile);
       }
 
       if (data?.rating) setRating(data.rating);
       if (data?.review) setReview(data.review);
-    } catch (error) {
-      console.error('Error loading job:', error);
-      router.push('/dashboard?error=load_failed');
+    } catch (error: any) {
+      console.error('CRITICAL LOAD FAILURE:', error);
+      setError(`Mission Data Sync Failure: ${error.message || 'Unknown protocol error'}`);
     } finally {
       setLoading(false);
     }
@@ -184,10 +218,11 @@ function JobDetailContent() {
 
   useEffect(() => {
     // Auto-trigger rating modal if job is completed by pro but not yet rated by customer
-    if (!isTradesmanView && job?.status === 'completed' && !job?.rating && !showRatingModal && !loading) {
+    const shouldRate = searchParams.get('rate') === 'true';
+    if (!isTradesmanView && (shouldRate || (job?.status === 'completed' && !job?.rating)) && !showRatingModal && !loading && !hasSkippedRating) {
       setShowRatingModal(true);
     }
-  }, [job, isTradesmanView, showRatingModal, loading]);
+  }, [job, isTradesmanView, showRatingModal, loading, hasSkippedRating, searchParams]);
 
   const handleMarkAsDone = async () => {
     if (!job || !user) return;
@@ -406,20 +441,34 @@ function JobDetailContent() {
     }
 
     setSubmitting(true);
+    console.log('[Statement] Initializing PDF generation sequence...');
 
     requestAnimationFrame(async () => {
       try {
         const canvas = await renderPdfCanvas('pdf-statement');
-        const imgData = canvas.toDataURL('image/jpeg', 0.85);
-        const pdf = new jsPDF({ orientation: 'p', unit: 'mm', format: 'a4', compress: true });
+        const imgData = canvas.toDataURL('image/jpeg', 0.95);
+        
+        // High-precision A4 parameters
+        const pdf = new jsPDF({ 
+           orientation: 'p', 
+           unit: 'mm', 
+           format: 'a4', 
+           compress: true 
+        });
+        
         const pdfWidth = pdf.internal.pageSize.getWidth();
         const imgProps = pdf.getImageProperties(imgData);
         const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        
         pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-        pdf.save(`Statement_${job.reference || job.id.slice(0,8)}.pdf`);
+        
+        const filename = `Statement_${job.reference || job.id.slice(0,8)}.pdf`;
+        console.log(`[Statement] PDF generated successfully. Downloading ${filename}`);
+        pdf.save(filename);
+        
       } catch (err: any) {
-        console.error('Statement generation failed:', err);
-        alert(`PDF Error: ${err?.message || 'Unknown error'}. Please try again.`);
+        console.error('[Statement] PDF generation failed:', err);
+        alert(`PDF Protocol Error: ${err?.message || 'Unknown rendering failure'}. If this persists, check network connectivity.`);
       } finally {
         setSubmitting(false);
       }
@@ -533,9 +582,21 @@ function JobDetailContent() {
      </div>
   );
 
-  if (!job) return (
-     <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-slate-400 font-black uppercase tracking-widest italic">Job Data Corrupted or Not Found</p>
+  if (error) return (
+     <div className="min-h-screen flex flex-col items-center justify-center bg-slate-900 p-8 text-center">
+        <div className="w-24 h-24 bg-red-500/10 rounded-[3rem] flex items-center justify-center mb-10 shadow-inner">
+           <ShieldAlert className="w-12 h-12 text-red-500" />
+        </div>
+        <h2 className="text-4xl font-black uppercase italic tracking-tighter text-white mb-6">Access <span className="text-red-500">Restricted</span></h2>
+        <p className="text-slate-400 text-lg font-medium max-w-md leading-relaxed italic mb-12">
+           {error}
+        </p>
+        <button 
+          onClick={() => router.push('/dashboard')}
+          className="px-12 py-6 bg-white text-slate-900 rounded-[2rem] font-black uppercase tracking-widest text-xs hover:scale-105 active:scale-95 transition-all shadow-2xl"
+        >
+           Return to Base
+        </button>
      </div>
   );
 
@@ -887,6 +948,22 @@ function JobDetailContent() {
                            </div>
                         </div>
                      </div>
+                     
+                     {job.rating && (
+                        <div className="bg-slate-50 p-6 rounded-3xl border border-slate-100 space-y-3 relative z-10">
+                           <div className="flex items-center justify-between">
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">Mission Feedback</p>
+                              <div className="flex text-accent">
+                                 {[1, 2, 3, 4, 5].map((s) => (
+                                    <Star key={s} className={cn("w-3 h-3", job.rating >= s ? "fill-accent" : "text-slate-200")} />
+                                 ))}
+                              </div>
+                           </div>
+                           <p className="text-xs font-medium text-slate-600 italic leading-relaxed">
+                              "{job.review || 'No written review provided.'}"
+                           </p>
+                        </div>
+                     )}
 
                      <div className="pt-8 border-t border-slate-50 space-y-4">
                         <button 
@@ -908,19 +985,40 @@ function JobDetailContent() {
                               >
                                   <XCircle className="w-5 h-5" /> Unlock for More Work
                               </button>
+                              {job.status === 'completed' && !job.rating && (
+                                 <button 
+                                     onClick={async () => {
+                                        try {
+                                           if (!job.customerId) return;
+                                           await createNotification({
+                                              userId: job.customerId,
+                                              type: 'rating_requested',
+                                              title: 'Rating Requested',
+                                              message: `${profile?.businessName || profile?.fullName || 'Professional'} has requested a rating for your recent mission.`,
+                                              jobId: job.id
+                                           });
+                                           alert("Mission evaluation request dispatched to client.");
+                                        } catch (err) {
+                                           console.error("Failed to request rating:", err);
+                                        }
+                                     }}
+                                     className="w-full py-4 bg-accent text-white rounded-xl text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-3 hover:scale-[1.02] active:scale-95 transition-all shadow-xl shadow-accent/20"
+                                 >
+                                     <Star className="w-5 h-5 fill-white" /> Request Mission Rating
+                                 </button>
+                              )}
                            </div>
                         )}
-                        {!isTradesmanView && job.status === 'completed' && !job.rating && (
+                        {!isTradesmanView && job.status === 'completed' && (
                            <button 
-                              disabled={!job.isPaid}
                               onClick={() => setShowRatingModal(true)}
                               className={cn(
                                 "w-full py-5 rounded-2xl text-[11px] font-black uppercase tracking-widest flex items-center justify-center gap-3 transition-all shadow-xl",
-                                job.isPaid ? "bg-green-500 text-white shadow-green-500/20 hover:scale-[1.02] active:scale-95" : "bg-slate-100 text-slate-400 cursor-not-allowed shadow-none"
+                                job.rating ? "bg-white border-2 border-slate-100 text-slate-600 hover:bg-slate-50" : "bg-green-500 text-white shadow-green-500/20 hover:scale-[1.02] active:scale-95"
                               )}
                            >
-                              <Star className={cn("w-5 h-5", job.isPaid ? "fill-white" : "fill-slate-300")} /> 
-                              {job.isPaid ? 'Rate Professional & Close Project' : 'Awaiting Final Payment to Rate'}
+                              <Star className={cn("w-5 h-5", job.rating ? "text-accent fill-accent" : "fill-white")} /> 
+                              {job.rating ? 'Update Mission Rating' : 'Rate Professional & Close Project'}
                            </button>
                         )}
                      </div>
@@ -1148,9 +1246,8 @@ function JobDetailContent() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               onClick={() => {
-                if (job?.rating || job?.status !== 'completed') {
-                  setShowRatingModal(false);
-                }
+                setShowRatingModal(false);
+                setHasSkippedRating(true);
               }}
               className="absolute inset-0 bg-slate-950/60 backdrop-blur-md" 
             />
@@ -1253,14 +1350,15 @@ function JobDetailContent() {
                   >
                     {submitting ? "Finalizing..." : (job?.rating ? "Update Rating" : "Submit & Close Job")}
                   </button>
-                  {(job?.rating || job?.status !== 'completed') && (
-                    <button 
-                      onClick={() => setShowRatingModal(false)}
-                      className="w-full py-4 text-slate-400 font-black uppercase tracking-widest text-[11px] hover:text-slate-600 transition-colors"
-                    >
-                      Cancel
-                    </button>
-                  )}
+                  <button 
+                    onClick={() => {
+                       setShowRatingModal(false);
+                       setHasSkippedRating(true);
+                    }}
+                    className="w-full py-4 text-slate-400 font-black uppercase tracking-widest text-[11px] hover:text-slate-600 transition-colors"
+                  >
+                    Skip for now
+                  </button>
                 </div>
               </div>
             </motion.div>

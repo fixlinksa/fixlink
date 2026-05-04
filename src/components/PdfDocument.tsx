@@ -150,6 +150,7 @@ export function PdfDocument({
                 <div style={{ marginBottom: '32px' }}>
                   <p style={{ fontSize: '12px', fontWeight: '900', textTransform: 'uppercase', letterSpacing: '0.1em', color: '#F7931E', margin: '0 0 12px 0' }}>Billed To</p>
                   <h3 style={{ fontSize: '18px', fontWeight: '900', color: '#1E4E79', margin: 0 }}>{job?.customerName || 'Standard Client'}</h3>
+                  {job?.customerVatNumber && <p style={{ fontSize: '11px', fontWeight: '900', color: '#1E4E79', margin: '4px 0 0 0', textTransform: 'uppercase' }}>VAT: {job.customerVatNumber}</p>}
                   {job?.customerPhone && <p style={{ fontSize: '12px', fontWeight: '600', color: '#475569', margin: '4px 0 0 0' }}>{job.customerPhone}</p>}
                   {job?.customerEmail && <p style={{ fontSize: '12px', fontWeight: '600', color: '#475569', margin: '2px 0 0 0' }}>{job.customerEmail}</p>}
                   <p style={{ fontSize: '12px', fontWeight: '600', color: '#475569', margin: '4px 0 0 0', lineHeight: '1.4' }}>
@@ -173,7 +174,7 @@ export function PdfDocument({
               {/* Totals Box */}
               <td style={{ width: '50%', verticalAlign: 'top' }}>
                 <div style={{ backgroundColor: '#f8fafc', borderRadius: '16px', padding: '24px' }}>
-                  {profile?.isVatRegistered ? (
+                  {(profile?.isVatRegistered || job?.isVatRegistered) ? (
                      <>
                         <table style={{ width: '100%', marginBottom: '12px' }}>
                           <tbody>
@@ -237,40 +238,45 @@ export function PdfDocument({
         {/* Banking Details */}
         {profile?.bankName && profile?.accountNumber && (
            <div className="mt-auto pt-8 border-t-2 mb-8" style={{ borderColor: '#f1f5f9' }}>
-              <p className="text-[10px] font-black uppercase tracking-widest mb-4" style={{ color: '#F7931E' }}>Payment Information</p>
-              <div className="flex flex-wrap gap-x-12 gap-y-6">
-                 <div>
-                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Bank</p>
-                    <p className="text-xs font-black uppercase" style={{ color: '#0f172a' }}>{profile.bankName}</p>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Account Name</p>
-                    <p className="text-xs font-black uppercase" style={{ color: '#0f172a' }}>{profile.accountHolder || profile.businessName || profile.fullName}</p>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Account No.</p>
-                    <p className="text-xs font-black" style={{ color: '#0f172a' }}>{profile.accountNumber}</p>
-                 </div>
-                 {profile?.accountType && (
-                   <div>
-                      <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Account Type</p>
-                      <p className="text-xs font-black uppercase" style={{ color: '#0f172a' }}>{profile.accountType}</p>
-                   </div>
-                 )}
-                  <div>
-                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Branch</p>
-                    <p className="text-xs font-black" style={{ color: '#0f172a' }}>{profile.branchCode}</p>
-                 </div>
-                 <div>
-                    <p className="text-[10px] font-bold uppercase mb-1" style={{ color: '#94a3b8' }}>Payment Ref</p>
-                    <p className="text-xs font-black" style={{ color: '#F7931E' }}>{job?.reference || job?.id?.slice(0,8)?.toUpperCase()}</p>
-                 </div>
-              </div>
+              <p className="text-[10px] font-black uppercase tracking-widest mb-6" style={{ color: '#F7931E' }}>Payment Information</p>
+              
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ paddingBottom: '24px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Bank</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#0f172a', textTransform: 'uppercase', margin: 0 }}>{profile.bankName}</p>
+                    </td>
+                    <td style={{ paddingBottom: '24px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account Name</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#0f172a', textTransform: 'uppercase', margin: 0 }}>{profile.accountHolder || profile.businessName || profile.fullName}</p>
+                    </td>
+                    <td style={{ paddingBottom: '24px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account No.</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#0f172a', margin: 0 }}>{profile.accountNumber}</p>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account Type</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#0f172a', textTransform: 'uppercase', margin: 0 }}>{profile.accountType || 'Current'}</p>
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Branch Code</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#0f172a', margin: 0 }}>{profile.branchCode || 'N/A'}</p>
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '10px', fontWeight: 'bold', color: '#94a3b8', textTransform: 'uppercase', margin: '0 0 4px 0' }}>Payment Ref</p>
+                      <p style={{ fontSize: '12px', fontWeight: '900', color: '#F7931E', textTransform: 'uppercase', margin: 0 }}>{job?.reference || job?.id?.slice(0,8)?.toUpperCase()}</p>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
            </div>
         )}
 
-        {/* Footer */}
-        <div className="mt-auto pt-6 border-t flex flex-col items-center justify-center gap-2" style={{ borderColor: '#f1f5f9' }}>
+        {/* Footer - Fixed structural spacing to prevent overlap */}
+        <div className="pt-12 border-t flex flex-col items-center justify-center gap-2" style={{ borderColor: '#f1f5f9', marginTop: '64px' }}>
            <div className="flex items-center gap-3">
               <img src="/FixLinkLogo.png" alt="Fix Link" className="w-8 h-8 object-contain mix-blend-multiply" />
               <p className="text-[11px] font-black uppercase tracking-widest" style={{ color: '#94a3b8' }}>

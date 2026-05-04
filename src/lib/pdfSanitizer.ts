@@ -100,10 +100,13 @@ export const renderPdfCanvas = async (elementId: string): Promise<HTMLCanvasElem
   const elWidth = element.scrollWidth || 900;
   const elHeight = element.scrollHeight || 1400;
 
+  console.log(`[PDF Engine] Initializing render for #${elementId} (${elWidth}x${elHeight})`);
+
   // Create a hidden iframe with no stylesheets
   const iframe = document.createElement('iframe');
-  iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts');
-  iframe.style.cssText = `position:fixed;top:-99999px;left:-99999px;width:${elWidth}px;height:${elHeight}px;border:none;visibility:hidden;`;
+  // REMOVED: sandbox attribute was too restrictive for some production CORS/CSP environments
+  iframe.src = 'about:blank';
+  iframe.style.cssText = `position:fixed;top:-10000px;left:-10000px;width:${elWidth}px;height:${elHeight}px;border:none;visibility:hidden;z-index:-1;`;
   document.body.appendChild(iframe);
 
   try {
@@ -111,35 +114,54 @@ export const renderPdfCanvas = async (elementId: string): Promise<HTMLCanvasElem
     iDoc.open();
     iDoc.write(`<!DOCTYPE html><html><head><meta charset="UTF-8"><style>
       *{box-sizing:border-box;margin:0;padding:0;}
-      body{background:#fff;font-family:${SAFE_FONT};color:#000;}
-      table{border-collapse:collapse;}
-      img{display:block;}
+      body{background:#fff;font-family:${SAFE_FONT};color:#000;width:${elWidth}px;height:${elHeight}px;overflow:hidden;}
+      table{border-collapse:collapse;width:100%;}
+      img{display:block;max-width:100%;height:auto;}
     </style></head><body>${cleanHtml}</body></html>`);
     iDoc.close();
 
     // Wait for images inside the iframe to load
     const images = Array.from(iDoc.querySelectorAll('img')) as HTMLImageElement[];
-    await Promise.all(images.map(img =>
-      img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; })
-    ));
-    // Extra settle time
-    await new Promise(r => setTimeout(r, 200));
+    console.log(`[PDF Engine] Waiting for ${images.length} images to load...`);
+    
+    await Promise.all(images.map(img => {
+      if (img.complete) return Promise.resolve();
+      return new Promise(resolve => {
+        img.onload = () => resolve(true);
+        img.onerror = () => {
+          console.warn(`[PDF Engine] Image failed to load: ${img.src}`);
+          resolve(false);
+        };
+      });
+    }));
+
+    // Extra settle time for rendering engine to finish painting
+    await new Promise(r => setTimeout(r, 400));
 
     const targetEl = iDoc.body.firstElementChild as HTMLElement || iDoc.body;
 
+    console.log('[PDF Engine] Capturing canvas via html2canvas...');
     const canvas = await html2canvas(targetEl, {
-      scale: 1.5,
+      scale: 2, // Increased scale for higher quality prints
       useCORS: true,
       allowTaint: false,
-      logging: false,
+      logging: true, // Enable logging for easier debugging in production console
       backgroundColor: '#ffffff',
       windowWidth: elWidth,
       windowHeight: elHeight,
+      width: elWidth,
+      height: elHeight,
     });
 
+    console.log('[PDF Engine] Canvas capture successful.');
     return canvas;
+  } catch (err) {
+    console.error('[PDF Engine] Critical Failure:', err);
+    throw err;
   } finally {
-    document.body.removeChild(iframe);
+    if (document.body.contains(iframe)) {
+      document.body.removeChild(iframe);
+    }
   }
 };
 

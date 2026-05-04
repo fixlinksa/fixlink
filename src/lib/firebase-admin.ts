@@ -13,16 +13,26 @@ import * as fs from 'node:fs';
  */
 
 function getAdminApp() {
-  if (admin.apps.length) {
+  // If already initialized, reuse the primary instance
+  if (admin.apps.length > 0) {
     return admin.apps[0];
   }
 
-  const serviceAccountKey = process.env.SERVICE_ACCOUNT_KEY_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
+  try {
+    const serviceAccountKey = process.env.SERVICE_ACCOUNT_KEY_JSON || process.env.FIREBASE_SERVICE_ACCOUNT_KEY;
 
-  // 1. Try Environment Variable
-  if (serviceAccountKey) {
-    try {
-      console.log('Firebase Admin: Initializing via FIREBASE_SERVICE_ACCOUNT_KEY');
+    // 1. Production/Cloud Environment: Attempt automatic synchronization
+    if (!serviceAccountKey && process.env.NODE_ENV === 'production') {
+      console.log('Firebase Admin: Initiating applicationDefault protocol');
+      return admin.initializeApp({
+        credential: admin.credential.applicationDefault(),
+        databaseURL: `https://${process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'fix-link-marketplace-928374'}.firebaseio.com`
+      });
+    }
+
+    // 2. Explicit Credential Protocol (Env or Local File)
+    if (serviceAccountKey) {
+      console.log('Firebase Admin: Initiating explicit credential protocol');
       let sanitizedKey = serviceAccountKey.trim();
       if ((sanitizedKey.startsWith("'") && sanitizedKey.endsWith("'")) || 
           (sanitizedKey.startsWith('"') && sanitizedKey.endsWith('"'))) {
@@ -35,49 +45,24 @@ function getAdminApp() {
       return admin.initializeApp({
         credential: admin.credential.cert(serviceAccount),
       });
-    } catch (error: any) {
-      console.warn('Firebase Admin: Env init failed:', error.message);
     }
-  }
 
-  // 2. Try Local Files (only in development)
-  if (process.env.NODE_ENV !== 'production') {
-    const saPaths = [
-      path.join(process.cwd(), 'sa.json'),
-      path.join(process.cwd(), 'src', 'lib', 'sa.json'),
-    ];
-
-    console.log('Firebase Admin: Searching for sa.json in:', saPaths);
-
-    for (const saPath of saPaths) {
-      if (fs.existsSync(saPath)) {
-        try {
-          console.log('Firebase Admin: Found service account at', saPath);
-          const serviceAccount = JSON.parse(fs.readFileSync(saPath, 'utf8'));
-          return admin.initializeApp({
-            credential: admin.credential.cert(serviceAccount),
-          });
-        } catch (error: any) {
-          console.error(`Firebase Admin: Error loading ${saPath}:`, error.message);
-        }
-      }
-    }
-  }
-
-  // 3. Fallback for production
-  if (process.env.NODE_ENV === 'production') {
-    try {
-      console.log('Firebase Admin: Falling back to applicationDefault');
+    // 3. Local Development Fallback
+    const localSaPath = path.join(process.cwd(), 'sa.json');
+    if (fs.existsSync(localSaPath)) {
+      console.log('Firebase Admin: Initiating local development protocol via sa.json');
+      const serviceAccount = JSON.parse(fs.readFileSync(localSaPath, 'utf8'));
       return admin.initializeApp({
-        credential: admin.credential.applicationDefault()
+        credential: admin.credential.cert(serviceAccount),
       });
-    } catch (e: any) {
-      console.error('Firebase Admin: applicationDefault failed:', e.message);
     }
-  }
 
-  console.error('Firebase Admin: FAILED TO INITIALIZE. No credentials found.');
-  return null;
+    console.warn('Firebase Admin: Initialization protocol incomplete - No credentials detected');
+    return null;
+  } catch (error: any) {
+    console.error('Firebase Admin: Protocol failure during initialization:', error.message);
+    return null;
+  }
 }
 
 // Global caching for development
@@ -95,12 +80,17 @@ function getInitializedApp() {
 // Fixed exports to be more reliable
 export const adminDb = {
   get firestore() {
-    const app = getInitializedApp();
-    if (!app) {
-      console.error('adminDb.firestore: App not initialized');
+    try {
+      const app = getInitializedApp();
+      if (!app) {
+        console.error('adminDb.firestore: FAILED - App initialization returned null');
+        return null;
+      }
+      return admin.firestore(app);
+    } catch (e: any) {
+      console.error('adminDb.firestore: EXCEPTION during acquisition:', e.message);
       return null;
     }
-    return admin.firestore(app);
   },
   collection(collectionPath: string) {
     const db = this.firestore;

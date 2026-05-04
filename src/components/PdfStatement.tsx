@@ -108,6 +108,7 @@ export const PdfStatement: React.FC<PdfStatementProps> = ({ job, profile, invoic
               <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', letterSpacing: '0.1em', fontStyle: 'italic', borderBottom: `1px solid ${colors.slate100}`, paddingBottom: '8px', margin: 0 }}>Mission Client</p>
               <div style={{ marginTop: '16px' }}>
                 <h3 style={{ fontWeight: 900, fontSize: '18px', textTransform: 'uppercase', fontStyle: 'italic', color: colors.slate900, margin: 0 }}>{job.customerName || 'Valued Client'}</h3>
+                {job.customerVatNumber && <p style={{ fontSize: '11px', fontWeight: '900', color: colors.primary, margin: '4px 0 0 0', textTransform: 'uppercase' }}>VAT: {job.customerVatNumber}</p>}
                 {job.customerEmail && <p style={{ fontSize: '14px', fontWeight: 500, color: colors.slate500, margin: '4px 0 0 0' }}>{job.customerEmail}</p>}
                 {job.customerPhone && <p style={{ fontSize: '14px', fontWeight: 500, color: colors.slate500, margin: '2px 0 0 0' }}>{job.customerPhone}</p>}
                 {job.customerAddress && <p style={{ fontSize: '10px', fontWeight: 700, color: colors.slate400, textTransform: 'uppercase', lineHeight: 1.5, maxWidth: '200px', margin: '4px 0 0 0' }}>{job.customerAddress}</p>}
@@ -280,8 +281,58 @@ export const PdfStatement: React.FC<PdfStatementProps> = ({ job, profile, invoic
             </tr>
           </tbody>
         </table>
+
+        {/* Banking Details */}
+        {profile?.bankName && profile?.accountNumber && (
+           <div style={{ marginTop: '32px', paddingTop: '32px', borderTop: `1px solid ${colors.slate100}` }}>
+              <p style={{ fontSize: '10px', fontWeight: 900, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.1em', fontStyle: 'italic', margin: '0 0 16px 0' }}>Payment Intelligence</p>
+              
+              <table style={{ width: '100%', borderCollapse: 'collapse', tableLayout: 'fixed' }}>
+                <tbody>
+                  <tr>
+                    <td style={{ paddingBottom: '16px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Bank</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate900, textTransform: 'uppercase', margin: 0 }}>{profile.bankName}</p>
+                    </td>
+                    <td style={{ paddingBottom: '16px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account Name</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate900, textTransform: 'uppercase', margin: 0 }}>{profile.accountHolder || profile.businessName || profile.fullName}</p>
+                    </td>
+                    <td style={{ paddingBottom: '16px', verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account No.</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate900, margin: 0 }}>{profile.accountNumber}</p>
+                    </td>
+                  </tr>
+                   <tr>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Account Type</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate900, textTransform: 'uppercase', margin: 0 }}>{profile.accountType || 'Current'}</p>
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Branch</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate900, margin: 0 }}>{profile.branchCode || 'N/A'}</p>
+                    </td>
+                    <td style={{ verticalAlign: 'top' }}>
+                      <p style={{ fontSize: '8px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', margin: '0 0 4px 0' }}>Payment Ref</p>
+                      <p style={{ fontSize: '10px', fontWeight: 900, color: colors.accent, textTransform: 'uppercase', margin: 0 }}>{job?.reference || job?.id?.slice(0,8)?.toUpperCase()}</p>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+           </div>
+        )}
+
+        {/* Footer - structural spacing to prevent overlap */}
+        <div style={{ marginTop: '80px', paddingTop: '32px', borderTop: `1px solid ${colors.slate100}`, textAlign: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '8px' }}>
+            <p style={{ fontSize: '10px', fontWeight: 900, color: colors.slate400, textTransform: 'uppercase', letterSpacing: '0.1em', margin: 0 }}>
+              Powered By <span style={{ color: colors.primary, fontSize: '12px' }}>FixLink</span>
+            </p>
+          </div>
+          <p style={{ fontSize: '8px', fontWeight: 700, color: colors.accent, textTransform: 'uppercase', letterSpacing: '0.2em', margin: 0 }}>Elite Maintenance Marketplace • www.fixlink.org.za</p>
+        </div>
         
-        <div style={{ textAlign: 'center', marginTop: '48px' }}>
+        <div style={{ textAlign: 'center', marginTop: '80px', paddingTop: '24px', borderTop: `1px solid ${colors.slate100}` }}>
           <p style={{ fontSize: '10px', fontWeight: 700, color: colors.slate400, textTransform: 'uppercase', letterSpacing: '0.25em', margin: 0 }}>Marketplace Statement • Generated via FixLink Protocol</p>
           <div style={{ display: 'inline-block', padding: '8px 24px', backgroundColor: colors.slate900, borderRadius: '9999px', fontSize: '8px', fontWeight: 900, color: colors.white, textTransform: 'uppercase', letterSpacing: '0.25em', fontStyle: 'italic', marginTop: '12px' }}>
             Mission Synchronized <span style={{ color: colors.primary }}>●</span> {new Date().getFullYear()} FixLink

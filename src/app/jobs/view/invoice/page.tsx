@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { 
   ArrowLeft, 
-  Download, 
   Plus, 
   Trash2, 
   ShieldCheck, 
@@ -13,10 +12,14 @@ import {
   User,
   Calendar,
   Package,
+  XCircle,
+  Play,
   CheckCircle2,
   AlertCircle,
+  ScrollText,
+  ShieldAlert,
   Loader2,
-  Percent,
+  Download,
   Mail
 } from 'lucide-react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -52,6 +55,7 @@ function InvoiceContent() {
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [isFinalizing, setIsFinalizing] = useState(false);
   const [isEmailing, setIsEmailing] = useState(false);
   const [notes, setNotes] = useState('');
@@ -68,7 +72,7 @@ function InvoiceContent() {
   const isCustomer = profile?.role === 'customer';
 
   useEffect(() => {
-    if (user) {
+    if (user && !authLoading) {
        loadData();
     }
   }, [user, id, authLoading]);
@@ -127,18 +131,31 @@ function InvoiceContent() {
 
         // IMPORTANT: Wait for authLoading to be false before evaluating unauthorized access
         const userRole = (profile?.role || '').toLowerCase();
-        const isProRole = userRole === 'tradesman' || userRole === 'professional' || userRole === 'pro';
+        const isProRole = userRole === 'tradesman' || 
+                         userRole === 'professional' || 
+                         userRole === 'pro' || 
+                         userRole === 'hero' || 
+                         userRole === 'operative' ||
+                         userRole === 'tradesperson' ||
+                         userRole === 'provider';
         const isCustomer = profile?.role === 'customer';
         const isAdmin = userRole === 'admin';
 
-        if (!authLoading && jobData && jobData.tradesmanId && jobData.tradesmanId !== user!.uid && !isCustomer && !isAdmin) {
+        if (authLoading) {
+           console.log('DEBUG [Invoice Guard]: Auth still loading, deferring guard.');
+           setLoading(false);
+           return;
+        }
+
+        if (jobData && jobData.tradesmanId && jobData.tradesmanId !== user!.uid && !isCustomer && !isAdmin) {
             console.warn('DEBUG [Invoice Guard]: Access denied.', { 
               jobId: id, 
               jobTradesmanId: jobData.tradesmanId, 
               currentUserUid: user!.uid,
               userRole: profile?.role
             });
-            router.push(`/dashboard?error=unauthorized&status=${jobData.status}&role=${profile?.role}`);
+            setError(`Unauthorized Access: Your account (${profile?.role || 'Guest'}) does not have authorization to architect invoices for this mission.`);
+            setLoading(false);
             return;
         }
 
@@ -202,9 +219,9 @@ function InvoiceContent() {
           }
         }
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error loading data:', error);
-      router.push('/dashboard/tradesman?error=load_failed');
+      setError(`Critical Data Failure: ${error.message || 'Mission protocols could not be established.'}`);
     } finally {
       setLoading(false);
     }
@@ -334,7 +351,7 @@ function InvoiceContent() {
   // Calculations
   const totals = lineItems.reduce((acc, item) => {
     const itemTotalIncl = (item.sellingIncl || 0) * (item.quantity || 1);
-    const isVatRegistered = profile?.isVatRegistered || false;
+    const isVatRegistered = profile?.isVatRegistered || job?.isVatRegistered || false;
     
     // If registered, Subtotal = total/1.15. If NOT registered, Subtotal = total.
     const itemTotalExcl = isVatRegistered ? (itemTotalIncl / 1.15) : itemTotalIncl;
@@ -359,6 +376,7 @@ function InvoiceContent() {
   const markup = totals.cost > 0 ? (profit / totals.cost) * 100 : 0;
 
   const isFinalized = job?.status === 'billed' || job?.status === 'completed';
+  const isReadOnly = isFinalized || (!!job?.customerId && isCustomer);
 
   const handleMarkAsPaid = async () => {
     if (!job || !activeInvoiceId) return;
@@ -518,17 +536,32 @@ function InvoiceContent() {
 
   const handleDownloadPdf = async () => {
     setIsFinalizing(true);
+    console.log('[Invoice] Starting PDF generation sequence...');
+    
     try {
       const canvas = await renderPdfCanvas('pdf-document');
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
-      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.95);
+      
+      const pdf = new jsPDF({ 
+        orientation: 'p', 
+        unit: 'mm', 
+        format: 'a4', 
+        compress: true 
+      });
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
-      pdf.save(`invoice_${id}.pdf`);
+      
+      const filename = `Invoice_${job?.reference || id?.slice(0,8)}.pdf`;
+      console.log(`[Invoice] PDF generated successfully. Downloading ${filename}`);
+      pdf.save(filename);
+      
     } catch (err: any) {
-      console.error('PDF generation failed:', err);
-      alert(`PDF Error: ${err?.message || 'Rendering failed'}. Please try again.`);
+      console.error('[Invoice] PDF Error:', err);
+      alert(`PDF Protocol Error: ${err?.message || 'Unknown rendering failure'}. Please check if the invoice content is visible.`);
     } finally {
       setIsFinalizing(false);
     }
@@ -540,12 +573,23 @@ function InvoiceContent() {
       return;
     }
     setIsEmailing(true);
+    console.log('[Invoice] Initializing PDF for email dispatch...');
+
     try {
       const canvas = await renderPdfCanvas('pdf-document');
-      const imgData = canvas.toDataURL('image/jpeg', 0.85);
-      const pdf = new jsPDF({ orientation: 'p', unit: 'pt', format: 'a4', compress: true });
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      
+      const pdf = new jsPDF({ 
+        orientation: 'p', 
+        unit: 'mm', 
+        format: 'a4', 
+        compress: true 
+      });
+      
       const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+      const imgProps = pdf.getImageProperties(imgData);
+      const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+      
       pdf.addImage(imgData, 'JPEG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST');
       const pdfBase64 = pdf.output('datauristring');
 
@@ -557,7 +601,7 @@ function InvoiceContent() {
           proName: profile?.businessName || profile?.fullName || 'Professional',
           type: 'Invoice',
           pdfBase64,
-          filename: `invoice_${job.id}.pdf`
+          filename: `Invoice_${job?.reference || job?.id?.slice(0,8)}.pdf`
         })
       });
       if (response.ok) {
@@ -577,6 +621,32 @@ function InvoiceContent() {
   if (loading) return (
      <div className="min-h-screen flex items-center justify-center bg-slate-50">
         <Loader2 className="w-12 h-12 text-primary animate-spin" />
+     </div>
+  );
+  
+  if (error) return (
+     <div className="min-h-screen flex items-center justify-center bg-slate-50 p-6">
+        <div className="max-w-md w-full bg-white rounded-[3rem] p-12 text-center shadow-2xl border border-slate-100">
+           <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mx-auto mb-8 text-red-500">
+              <ShieldAlert className="w-10 h-10" />
+           </div>
+           <h2 className="text-3xl font-black uppercase tracking-tight italic mb-4">Access <span className="text-red-500">Restricted</span></h2>
+           <p className="text-slate-500 font-medium leading-relaxed mb-10 italic">
+              {error}
+           </p>
+           <button 
+             onClick={() => router.push('/dashboard')}
+             className="w-full py-6 bg-slate-900 text-white rounded-[2rem] font-black uppercase tracking-widest text-xs hover:scale-105 transition-all shadow-xl shadow-black/10"
+           >
+             Return to Dashboard
+           </button>
+        </div>
+     </div>
+  );
+
+  if (!job) return (
+     <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-slate-400 font-black uppercase tracking-widest italic">Mission Intelligence Not Found</p>
      </div>
   );
 
@@ -709,26 +779,44 @@ function InvoiceContent() {
                             placeholder="Enter Client Name..." 
                             value={job?.customerName || ''}
                             onChange={(e) => setJob({ ...job!, customerName: e.target.value })}
-                            disabled={isFinalized || isCustomer}
+                            disabled={isReadOnly}
                             className="text-2xl font-black text-slate-900 tracking-tight uppercase italic bg-slate-50 border-transparent rounded-xl px-4 py-2 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
                           />
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                            <input 
-                              type="text" 
-                              placeholder="Phone Number" 
+                            <input
+                              type="text"
+                              placeholder="Phone Number"
                               value={job?.customerPhone || ''}
                               onChange={(e) => setJob({ ...job!, customerPhone: e.target.value })}
-                              disabled={isFinalized || isCustomer}
-                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
                             />
-                            <input 
-                              type="email" 
-                              placeholder="Email Address" 
+                            <input
+                              type="email"
+                              placeholder="Email Address"
                               value={job?.customerEmail || ''}
                               onChange={(e) => setJob({ ...job!, customerEmail: e.target.value })}
-                              disabled={isFinalized || isCustomer}
-                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full disabled:opacity-70 disabled:cursor-not-allowed"
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
                             />
+                            <input
+                              type="text"
+                              placeholder="Customer VAT Number (if applicable)"
+                              value={job?.customerVatNumber || ''}
+                              onChange={(e) => setJob({ ...job!, customerVatNumber: e.target.value, isVatRegistered: !!e.target.value })}
+                              readOnly={isReadOnly}
+                              className="text-xs font-bold text-slate-600 bg-slate-50 border-transparent rounded-xl px-4 py-3 outline-none focus:border-primary shadow-inner w-full"
+                            />
+                            <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 rounded-xl">
+                               <input 
+                                 type="checkbox"
+                                 checked={job?.isVatRegistered || false}
+                                 onChange={(e) => setJob({ ...job!, isVatRegistered: e.target.checked })}
+                                 disabled={isReadOnly}
+                                 className="w-4 h-4 accent-primary rounded-lg"
+                               />
+                               <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest italic">VAT Registered Customer</span>
+                            </div>
                           </div>
                          <LocationSearch 
                            placeholder="Full Address / Location" 
@@ -772,7 +860,7 @@ function InvoiceContent() {
                          initial={{ opacity: 0, x: -20 }}
                          animate={{ opacity: 1, x: 0 }}
                          exit={{ opacity: 0, x: 20 }}
-                         className="flex flex-col md:flex-row items-end md:items-center gap-4 p-4 rounded-[2rem] border border-slate-100 hover:border-primary/20 transition-all bg-slate-50/30"
+                         className="flex flex-col md:flex-row items-stretch md:items-center gap-4 p-6 rounded-[2.5rem] border border-slate-100 hover:border-primary/20 transition-all bg-slate-50/30"
                        >
                           <div className="flex-1 space-y-1 w-full relative">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Inventory Link</label>
@@ -796,7 +884,7 @@ function InvoiceContent() {
                                            });
                                         }
                                       }}
-                                      className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary shadow-sm appearance-none disabled:opacity-70"
+                                      className="w-full bg-white border-transparent p-5 rounded-2xl text-sm font-black outline-none focus:border-primary shadow-sm appearance-none disabled:opacity-70"
                                     >
                                       <option value="" disabled>Select from Inventory...</option>
                                       {inventory.map(inv => (
@@ -806,26 +894,26 @@ function InvoiceContent() {
                                     <button 
                                       onClick={() => setIsQuickAddOpen(true)}
                                       disabled={isFinalized}
-                                      className="shrink-0 aspect-square p-4 bg-white text-slate-400 border border-transparent rounded-xl hover:text-primary hover:border-primary/20 shadow-sm transition-all disabled:opacity-50"
+                                      className="shrink-0 aspect-square p-5 bg-white text-slate-400 border border-transparent rounded-2xl hover:text-primary hover:border-primary/20 shadow-sm transition-all disabled:opacity-50"
                                       title="Add new stock inline"
                                     >
-                                       <Plus className="w-4 h-4" />
+                                       <Plus className="w-5 h-5" />
                                     </button>
                                   </>
                                 )}
                              </div>
                           </div>
-                          <div className="w-24 space-y-1">
+                          <div className="w-full md:w-24 space-y-1">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Qty</label>
                              <input 
                                type="number"
                                value={item.quantity}
                                disabled={isFinalized || isCustomer}
                                onChange={(e) => updateItem(item.id, { quantity: parseFloat(e.target.value) })}
-                               className="w-full bg-white border-transparent p-4 rounded-xl text-[11px] font-bold outline-none focus:border-primary text-center shadow-sm disabled:opacity-70"
+                               className="w-full bg-white border-transparent p-5 rounded-2xl text-sm font-black outline-none focus:border-primary text-center shadow-sm disabled:opacity-70"
                              />
                           </div>
-                          <div className="w-32 space-y-1">
+                          <div className="w-full md:w-32 space-y-1">
                              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic ml-3">Unit (Incl)</label>
                              <div className="relative">
                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[10px] text-slate-400 font-black">R</span>
@@ -833,13 +921,13 @@ function InvoiceContent() {
                                   disabled
                                   type="number"
                                   value={item.sellingIncl}
-                                  className="w-full bg-slate-100/50 text-slate-500 border-transparent p-4 pl-7 rounded-xl text-[11px] font-bold outline-none cursor-not-allowed shadow-sm"
+                                  className="w-full bg-slate-100/50 text-slate-500 border-transparent p-5 pl-8 rounded-2xl text-sm font-black outline-none cursor-not-allowed shadow-sm"
                                 />
                              </div>
                           </div>
-                          <div className="text-right px-4 shrink-0 min-w-[5rem]">
+                          <div className="text-left md:text-right px-4 shrink-0 min-w-[5rem]">
                              <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest italic mb-0.5">Total</p>
-                             <p className="text-sm font-black text-slate-900">R{(item.sellingIncl * item.quantity).toFixed(2)}</p>
+                             <p className="text-lg md:text-sm font-black text-slate-900">R{(item.sellingIncl * item.quantity).toFixed(2)}</p>
                              {item.inventoryId && (
                                 <div className="mt-1">
                                    {(() => {
@@ -1078,19 +1166,13 @@ function InvoiceContent() {
                 ) : isFinalized ? (
                    <div className="space-y-4">
                       {profile?.role === 'tradesman' && (
-                         <button 
-                            onClick={handleMarkAsPaid}
-                            disabled={isFinalizing}
-                            className="w-full py-8 bg-green-600 text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-green-600/30 flex items-center justify-center gap-4 group"
+                         <button
+                           onClick={handleMarkAsPaid}
+                           disabled={isFinalizing}
+                           className="w-full py-10 md:py-8 bg-green-600 text-white rounded-[2.5rem] font-black uppercase tracking-widest text-base md:text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
                          >
-                            {isFinalizing ? (
-                               <Loader2 className="w-6 h-6 animate-spin" />
-                            ) : (
-                               <>
-                                  Mark as Paid
-                                  <DollarSign className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                               </>
-                            )}
+                            {isFinalizing ? <Loader2 className="w-8 h-8 animate-spin" /> : <DollarSign className="w-8 h-8" />}
+                            Mark as Paid
                          </button>
                       )}
                       <div className="w-full py-6 bg-slate-100 text-slate-400 rounded-[2rem] font-black uppercase tracking-widest text-xs flex items-center justify-center gap-4">
@@ -1099,19 +1181,12 @@ function InvoiceContent() {
                       </div>
                    </div>
                 ) : (
-                   <button 
-                     onClick={handleFinalize}
-                     disabled={isFinalizing || lineItems.length === 0}
-                     className="w-full py-8 bg-primary text-white rounded-[2rem] font-black uppercase tracking-widest text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl shadow-primary/30 flex items-center justify-center gap-4 group"
+                   <button
+                      onClick={handleFinalize}
+                      disabled={isFinalizing || lineItems.length === 0}
+                      className="w-full py-10 md:py-8 bg-primary text-white rounded-[2.5rem] font-black uppercase tracking-widest text-base md:text-sm hover:scale-[1.02] active:scale-95 transition-all shadow-2xl flex items-center justify-center gap-4"
                    >
-                      {isFinalizing ? (
-                        <Loader2 className="w-6 h-6 animate-spin" />
-                      ) : (
-                        <>
-                           Finalize Job
-                           <CheckCircle2 className="w-6 h-6 group-hover:scale-110 transition-transform" />
-                        </>
-                      )}
+                     {isFinalizing ? <Loader2 className="w-8 h-8 animate-spin" /> : 'Finalize Job & Issue Invoice'}
                    </button>
                 )}
              </div>

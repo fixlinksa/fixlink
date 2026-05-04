@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { adminDb, adminAuth } from '@/lib/firebase-admin';
+import { adminDb, adminAuth, admin } from '@/lib/firebase-admin';
 import { sendReviewReceivedEmail } from '@/lib/email';
 import { FieldValue } from 'firebase-admin/firestore';
 
@@ -38,50 +38,70 @@ export async function POST(req: Request) {
         code: authError.code
       }, { status: 401 });
     }
-    const userId = decodedToken.uid;
 
+    const userId = decodedToken.uid;
     const { jobId, rating, review = '' } = await req.json();
+    console.log('Verifying mission evaluation for Job:', jobId);
 
     if (!jobId || typeof rating !== 'number') {
-      return NextResponse.json({ error: 'Missing required fields: jobId and rating are required' }, { status: 400 });
+      console.error('Rating API: Missing required mission data');
+      return NextResponse.json({ error: 'Incomplete mission briefing: jobId and rating required' }, { status: 400 });
     }
 
     // Get Job Data
-    const jobRef = adminDb.collection('jobs').doc(jobId);
+    const db = adminDb.firestore;
+    if (!db) {
+       console.error('Rating API: Intelligence database offline');
+       return NextResponse.json({ error: 'Strategic Intelligence database offline' }, { status: 503 });
+    }
+
+    const jobRef = db.collection('jobs').doc(jobId);
     const jobSnap = await jobRef.get();
 
     if (!jobSnap.exists) {
-      return NextResponse.json({ error: 'Job not found' }, { status: 404 });
+      console.error('Rating API: Target mission not found:', jobId);
+      return NextResponse.json({ error: 'Mission record not found' }, { status: 404 });
     }
 
     const jobData = jobSnap.data();
+    console.log('Mission Data acquired. Customer ID:', jobData?.customerId);
 
     // Verify ownership
     if (jobData?.customerId !== userId) {
-      return NextResponse.json({ error: 'Forbidden: You do not own this job' }, { status: 403 });
+      console.error('Rating API: Unauthorized operative access. Expected:', jobData?.customerId, 'Got:', userId);
+      return NextResponse.json({ error: 'Unauthorized operative access detected' }, { status: 403 });
     }
 
     const proId = jobData?.tradesmanId;
     if (!proId) {
-      return NextResponse.json({ error: 'No professional assigned to this job' }, { status: 400 });
+      console.error('Rating API: No specialist assigned to mission:', jobId);
+      return NextResponse.json({ error: 'No primary specialist assigned to mission' }, { status: 400 });
     }
 
     const oldRating = jobData?.rating;
     const isOverride = typeof oldRating === 'number';
 
+    console.log('Executing mission closure update...');
     // Update Job
-    await jobRef.update({
-      status: 'completed',
-      rating,
-      review,
-      completedAt: FieldValue.serverTimestamp()
-    });
+    try {
+      await jobRef.update({
+        status: 'completed',
+        rating,
+        review,
+        completedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      console.log('Mission record updated successfully');
+    } catch (updateError: any) {
+      console.error('Rating API: Failed to update mission record:', updateError);
+      throw new Error(`Mission update protocol failure: ${updateError.message}`);
+    }
 
     // Update Professional's average rating
-    const proRef = adminDb.collection('users').doc(proId);
+    const proRef = db.collection('users').doc(proId);
     const proSnap = await proRef.get();
 
     if (proSnap.exists) {
+      console.log('Acquiring specialist performance profile:', proId);
       const proData = proSnap.data() || {};
       const currentRating = typeof proData.rating === 'number' ? proData.rating : 5.0;
       const currentCount = typeof proData.reviewCount === 'number' ? proData.reviewCount : 0;
@@ -90,10 +110,6 @@ export async function POST(req: Request) {
       let calculatedRating = currentRating;
 
       if (isOverride) {
-        // If overriding, we don't change the count, just update the sum
-        // Sum = currentRating * currentCount
-        // NewSum = Sum - oldRating + newRating
-        // NewRating = NewSum / currentCount
         if (currentCount > 0) {
           calculatedRating = ((currentRating * currentCount) - oldRating + rating) / currentCount;
         } else {
@@ -101,7 +117,6 @@ export async function POST(req: Request) {
           newCount = 1;
         }
       } else {
-        // First time rating
         newCount = currentCount + 1;
         calculatedRating = currentCount === 0 ? rating : ((currentRating * currentCount) + rating) / newCount;
       }
@@ -112,19 +127,25 @@ export async function POST(req: Request) {
         rating: finalRating,
         reviewCount: newCount
       });
+      console.log('Specialist performance metrics synchronized');
 
       // Notify Professional
-      await adminDb.collection('notifications').add({
-        userId: proId,
-        type: 'job_completed',
-        title: isOverride ? 'Review Updated' : 'Mission Accomplished!',
-        message: isOverride 
-          ? `Customer ${jobData.customerName || 'someone'} updated their review for "${jobData.title}" to ${rating} stars.`
-          : `Customer ${jobData.customerName || 'someone'} marked "${jobData.title}" as complete and gave you ${rating} stars.`,
-        jobId,
-        createdAt: FieldValue.serverTimestamp(),
-        read: false
-      });
+      try {
+        await db.collection('notifications').add({
+          userId: proId,
+          type: 'job_completed',
+          title: isOverride ? 'Review Updated' : 'Mission Accomplished!',
+          message: isOverride 
+            ? `Customer ${jobData.customerName || 'someone'} updated their review for "${jobData.title}" to ${rating} stars.`
+            : `Customer ${jobData.customerName || 'someone'} marked "${jobData.title}" as complete and gave you ${rating} stars.`,
+          jobId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp(),
+          read: false
+        });
+        console.log('Specialist notification dispatched');
+      } catch (notifError) {
+        console.warn('Rating API: Non-critical notification failure:', notifError);
+      }
 
       // Send Email
       if (proData.email) {
@@ -135,6 +156,7 @@ export async function POST(req: Request) {
             jobData.title,
             rating
           );
+          console.log('Evaluation dispatch email sent to:', proData.email);
         } catch (emailError) {
           console.error('Failed to send review email:', emailError);
         }
@@ -143,7 +165,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ success: true });
   } catch (error: any) {
-    console.error('Rating API Error:', error);
-    return NextResponse.json({ error: error.message || 'Internal Server Error' }, { status: 500 });
+    console.error('--- RATING PROTOCOL FAILURE ---');
+    console.error('Message:', error.message);
+    console.error('Stack:', error.stack);
+    return NextResponse.json({ 
+      error: error.message || 'Internal Protocol Failure',
+      details: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    }, { status: 500 });
   }
 }

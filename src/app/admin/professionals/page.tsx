@@ -35,11 +35,36 @@ export default function AdminProfessionalsPage() {
 
   const loadPros = async () => {
     setLoading(true);
+    console.log('--- ADMIN INTEL: Initiating Professional Fleet Recon ---');
     try {
-      const data = await getUsersByRole('tradesman');
-      setPros(data);
+      // Fetch all variants of the professional role
+      console.log('Fetching roles: tradesman, professional, pro...');
+      const [tradesmen, professionals, prosList] = await Promise.all([
+        getUsersByRole('tradesman').catch(e => { console.error('Tradesman fetch failed:', e); return []; }),
+        getUsersByRole('professional').catch(e => { console.error('Professional fetch failed:', e); return []; }),
+        getUsersByRole('pro').catch(e => { console.error('Pro fetch failed:', e); return []; })
+      ]);
+
+      console.log('Results gathered:', {
+        tradesmen: tradesmen.length,
+        professionals: professionals.length,
+        prosList: prosList.length
+      });
+
+      // De-duplicate and merge
+      const combined = [...tradesmen, ...professionals, ...prosList];
+      const uniqueMap = new Map();
+      combined.forEach(p => {
+        if (p && p.id) uniqueMap.set(p.id, p);
+      });
+      
+      const allPros = Array.from(uniqueMap.values());
+      console.log('Total unique professionals identified:', allPros.length);
+      
+      setPros(allPros);
     } catch (error) {
-      console.error('Error loading pros:', error);
+      console.error('CRITICAL FLEET RECON FAILURE:', error);
+      alert('Mission Error: Failed to synchronize professional fleet data.');
     } finally {
       setLoading(false);
     }
@@ -50,9 +75,14 @@ export default function AdminProfessionalsPage() {
   };
 
   const filteredPros = pros.filter(pro => {
-    const matchesSearch = pro.fullName.toLowerCase().includes(searchTerm.toLowerCase()) || 
-                          pro.businessName?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-                          pro.trade?.toLowerCase().includes(searchTerm.toLowerCase());
+    const searchLower = searchTerm.toLowerCase();
+    const fullName = pro.fullName || '';
+    const businessName = pro.businessName || pro.companyName || '';
+    const trade = pro.trade || '';
+
+    const matchesSearch = fullName.toLowerCase().includes(searchLower) || 
+                          businessName.toLowerCase().includes(searchLower) ||
+                          trade.toLowerCase().includes(searchLower);
     const matchesTier = selectedTier === 'all' || pro.tier === selectedTier;
     return matchesSearch && matchesTier;
   });
@@ -184,7 +214,7 @@ export default function AdminProfessionalsPage() {
                                 pro.tier === 'gold' ? 'bg-primary/10 border-primary text-primary' :
                                 'bg-slate-100 border-slate-200 text-slate-400'
                               )}>
-                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'The Fix Link'}
+                                {pro.tier && (TIER_CONFIG as any)[pro.tier] ? (TIER_CONFIG as any)[pro.tier].name : 'The Fix Link'}
                               </div>
                            </div>
                         </td>
@@ -262,7 +292,7 @@ export default function AdminProfessionalsPage() {
                                pro.tier === 'gold' ? 'bg-primary/10 border-primary text-primary' :
                                'bg-slate-100 border-slate-200 text-slate-400'
                              )}>
-                                {pro.tier ? TIER_CONFIG[pro.tier as TierId].name : 'The Fix Link'}
+                                {pro.tier && (TIER_CONFIG as any)[pro.tier] ? (TIER_CONFIG as any)[pro.tier].name : 'The Fix Link'}
                              </span>
                           </div>
                        </div>
